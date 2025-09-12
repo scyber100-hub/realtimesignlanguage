@@ -23,6 +23,37 @@ _LEXICON = {
     "비": "RAIN",
     "눈": "SNOW",
     "맑음": "SUNNY",
+    # 뉴스/기상/재난 도메인(예시 확장)
+    "속보": "BREAKING",
+    "기상": "WEATHER",
+    "기온": "TEMPERATURE",
+    "영하": "BELOW_ZERO",
+    "영상": "ABOVE_ZERO",
+    "강풍": "STRONG_WIND",
+    "호우": "HEAVY_RAIN",
+    "폭우": "HEAVY_RAIN",
+    "폭설": "HEAVY_SNOW",
+    "경보": "ALERT",
+    "주의보": "ADVISORY",
+    "발표": "ANNOUNCE",
+    "속도": "SPEED",
+    "시간": "TIME",
+    "분": "MINUTE",
+    "시": "HOUR",
+    "오늘밤": "TONIGHT",
+    "오전": "MORNING",
+    "오후": "AFTERNOON",
+    "밤": "NIGHT",
+    "새벽": "DAWN",
+    "서울": "SEOUL",
+    "부산": "BUSAN",
+    "대구": "DAEGU",
+    "인천": "INCHEON",
+    "광주": "GWANGJU",
+    "대전": "DAEJEON",
+    "울산": "ULSAN",
+    "제주": "JEJU",
+    "전국": "NATIONWIDE",
 }
 
 def ko_to_gloss(tokens: List[str]) -> List[Tuple[str, float]]:
@@ -33,7 +64,16 @@ def ko_to_gloss(tokens: List[str]) -> List[Tuple[str, float]]:
             glosses.append((g, 0.9))
         else:
             # 미정 매핑: 지명/숫자/고유명사 등은 규칙/NER 처리 대상
-            glosses.append((t.upper(), 0.5))
+            # 숫자 규칙(간단): "12시" → NUM_12 + HOUR
+            if t.isdigit():
+                glosses.append((f"NUM_{t}", 0.85))
+            elif t.endswith("시") and t[:-1].isdigit():
+                glosses.append((f"NUM_{t[:-1]}", 0.85))
+                glosses.append(("HOUR", 0.85))
+            elif t.endswith("분") and t[:-1].isdigit():
+                glosses.append((f"NUM_{t[:-1]}", 0.85))
+                glosses.append(("MINUTE", 0.85))
+            else:
+                glosses.append((t.upper(), 0.5))
     # 간단한 불용어/어순 조정은 추후 추가
     return glosses
-

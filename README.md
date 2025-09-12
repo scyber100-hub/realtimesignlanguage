@@ -32,6 +32,10 @@ AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
 - 텍스트 인입(모의 ASR): `powershell -ExecutionPolicy Bypass -File scripts/ingest_text.ps1 -Text "속보 태풍 오늘 한국"`
   - 클라이언트 콘솔에 SignTimeline JSON이 브로드캐스트됩니다.
 
+증분 스트리밍(모의 ASR)
+- WS 인입: `python scripts/mock_asr_stream.py --text "안녕하세요 오늘 한국 날씨 속보 태풍"`
+- 서버는 최초 `timeline`, 이후 `timeline.replace(from_t_ms)` 메시지를 브로드캐스트합니다.
+
 폴더 구조
 - `services/` 서비스 경계 문서 및 스텁
 - `packages/` 규칙/타임라인 생성 라이브러리(파이썬)
@@ -49,6 +53,7 @@ AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
 - `docs/FFMPEG_PIPELINES.md` 인입/송출 예시와 저지연 팁
 - `docs/LATENCY_TUNING.md` 1초 지연 튜닝 체크리스트
 - `docs/UNITY_ADAPTER.md` Unity 연동 규약
+ - `unity/` Unity용 C# 스크립트와 사용법
 
 GitHub 푸시
 - 리포지토리를 초기화하고 푸시하려면(예시):
