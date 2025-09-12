@@ -33,6 +33,8 @@ pipeline-server (본 리포지토리 포함)
   - GET /healthz → 상태 확인
   - GET /metrics → Prometheus 지표 노출
   - GET /stats → 경량 런타임 통계(JSON)
+  - GET /config → 안전 설정 조회(version, include_aux_channels, max_ingest_rps, enable_metrics)
+  - POST /config/update { include_aux_channels?, max_ingest_rps? }
   - POST /ingest_text { text, start_ms?, gap_ms?, id? } → SignTimeline 생성 및 WS 브로드캐스트
   - POST /text2gloss { text } → { gloss, conf }
   - POST /gloss2timeline { gloss[], conf?[], start_ms?, gap_ms? } → SignTimeline(JSON)
@@ -41,6 +43,7 @@ pipeline-server (본 리포지토리 포함)
   - POST /lexicon/snapshot { note? } → 현재 오버레이 사전을 lexicon/versions/overlay-*.json로 저장
   - GET /lexicon/versions → 저장된 스냅샷 목록(name, mtime, size)
   - POST /lexicon/rollback { name } → 지정 스냅샷으로 롤백 적용
+  - GET /timeline/last → 마지막 브로드캐스트 타임라인 페이로드(JSON)
   - WS /ws/timeline → 타임라인 push 수신
   - WS /ws/ingest → {type:"partial"|"final", session_id, text, start_ms?, gap_ms?} 증분 인입
     - 서버는 최초 full `timeline`, 이후 차이점부터 `timeline.replace`(from_t_ms 포함) 전송

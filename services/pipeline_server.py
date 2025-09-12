@@ -129,6 +129,39 @@ async def get_config(_: None = Depends(require_api_key)):
     }
 
 
+class ConfigUpdate(BaseModel):
+    include_aux_channels: Optional[bool] = None
+    max_ingest_rps: Optional[int] = None
+
+
+@app.post("/config/update")
+async def update_config(req: ConfigUpdate, _: None = Depends(require_api_key)):
+    changed = {}
+    if req.include_aux_channels is not None:
+        settings.include_aux_channels = bool(req.include_aux_channels)
+        changed["include_aux_channels"] = settings.include_aux_channels
+    if req.max_ingest_rps is not None:
+        try:
+            v = int(req.max_ingest_rps)
+            if v < 1:
+                raise ValueError("max_ingest_rps must be >=1")
+            settings.max_ingest_rps = v
+            changed["max_ingest_rps"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "changed": changed}
+
+
+@app.get("/timeline/last")
+async def get_last_timeline(_: None = Depends(require_api_key)):
+    if not LAST_TIMELINE_PATH.exists():
+        return {"exists": False}
+    try:
+        return json.loads(LAST_TIMELINE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {"exists": False}
+
+
 class TextIn(BaseModel):
     text: str
 
@@ -169,6 +202,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 TIMELINE_LOG = LOG_DIR / "timeline.log"
 VERS_DIR = Path("lexicon/versions")
 VERS_DIR.mkdir(parents=True, exist_ok=True)
+LAST_TIMELINE_PATH = LOG_DIR / "last_timeline.json"
 
 
 def _log_timeline(evt_type: str, payload: Dict[str, Any]):
@@ -183,6 +217,10 @@ def _log_timeline(evt_type: str, payload: Dict[str, Any]):
         }
         with TIMELINE_LOG.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        try:
+            LAST_TIMELINE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
     except Exception as e:
         logger.debug(f"timeline log error: {e}")
 
