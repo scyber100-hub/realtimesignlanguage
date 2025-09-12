@@ -26,6 +26,10 @@
     <label>max_ingest_rps <input type="number" id="rpsInput" min="1" style="width:80px;"/></label>
     <button id="cfgUpdate">POST /config/update</button>
     <button id="lastTl">GET /timeline/last</button>
+    <label>p90 warn(ms) <input type="number" id="latWarn" value="1200" style="width:80px;"/></label>
+    <label>rep warn <input type="number" id="repWarn" value="0.5" step="0.01" min="0" max="1" style="width:70px;"/></label>
+    <label>RL warn <input type="number" id="rlWarn" value="0.1" step="0.01" min="0" max="1" style="width:70px;"/></label>
+    <button id="thUpdate">Update thresholds</button>
   </div>
   <pre id="lastTlOut" style="display:block; max-height:220px;"></pre>
   <div class="row">
@@ -105,6 +109,7 @@
     const logEl = document.getElementById('log');
     const statusEl = document.getElementById('status');
     let ws = null;
+    let cfg = { latency_p90_warn_ms: 1200, replace_ratio_warn: 0.5, rate_limit_ratio_warn: 0.1 };
 
     function log(msg) {
       const t = new Date().toISOString();
@@ -208,7 +213,7 @@
               const repEl = document.getElementById('rep_ratio');
               const repRatio = s.timeline_replace_ratio ?? 0;
               repEl.textContent = repRatio;
-              repEl.style.background = repRatio > 0.5 ? '#ff9aa2' : '#c2f0c2';
+              repEl.style.background = repRatio > (cfg.replace_ratio_warn||0.5) ? '#ff9aa2' : '#c2f0c2';
             })();
             document.getElementById('ing_p').textContent = s.ingest_partial_total ?? 0;
             document.getElementById('ing_f').textContent = s.ingest_final_total ?? 0;
@@ -217,7 +222,7 @@
               const latEl = document.getElementById('last_lat');
               const p90 = (s.latency_ms && s.latency_ms.p90) || 0;
               latEl.textContent = s.last_ingest_to_bc_ms ?? '-';
-              latEl.style.background = p90 > 1200 ? '#ff9aa2' : '#c2f0c2';
+              latEl.style.background = p90 > (cfg.latency_p90_warn_ms||1200) ? '#ff9aa2' : '#c2f0c2';
             })();
             document.getElementById('sess_count').textContent = s.session_count ?? 0;
             if (document.getElementById('rl_total')) document.getElementById('rl_total').textContent = s.ingest_rate_limited_total ?? 0;
@@ -280,6 +285,23 @@
         document.getElementById('rpsInput').value = data.max_ingest_rps;
       }
       log('GET /config => ' + JSON.stringify(data));
+    };
+
+    document.getElementById('thUpdate').onclick = async () => {
+      const headers = getHeaders();
+      const body = {
+        latency_p90_warn_ms: parseInt(document.getElementById('latWarn').value||'0')||0,
+        replace_ratio_warn: parseFloat(document.getElementById('repWarn').value||'0')||0,
+        rate_limit_ratio_warn: parseFloat(document.getElementById('rlWarn').value||'0')||0,
+      };
+      const res = await fetch('/config/update', { method: 'POST', headers, body: JSON.stringify(body)});
+      const data = await res.json();
+      if (data.changed){
+        if (typeof data.changed.latency_p90_warn_ms !== 'undefined') cfg.latency_p90_warn_ms = data.changed.latency_p90_warn_ms;
+        if (typeof data.changed.replace_ratio_warn !== 'undefined') cfg.replace_ratio_warn = data.changed.replace_ratio_warn;
+        if (typeof data.changed.rate_limit_ratio_warn !== 'undefined') cfg.rate_limit_ratio_warn = data.changed.rate_limit_ratio_warn;
+      }
+      log('POST /config/update thresholds => ' + JSON.stringify(data));
     };
 
     document.getElementById('cfgUpdate').onclick = async () => {
