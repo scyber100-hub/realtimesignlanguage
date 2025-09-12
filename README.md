@@ -93,6 +93,13 @@ Docker 실행
 Self-check
 - 빠른 점검: `python scripts/self_check.py`
 
+웹 대시보드
+- 서버 기동 후 브라우저에서 `http://localhost:8000/` 접속
+- 실시간 WebSocket 타임라인을 콘솔로 확인하고 `POST /ingest_text` 테스트 가능
+
+환경설정(.env)
+- 예시: `.env.example`를 `.env`로 복사 후 값 설정 → 서버가 자동 로드
+
 GitHub 푸시
 - 리포지토리를 초기화하고 푸시하려면(예시):
   1) `git init && git add . && git commit -m "init: kor→ksl realtime scaffold"`

@@ -15,5 +15,10 @@ class Settings:
 
 @lru_cache
 def get_settings() -> Settings:
+    # load .env if present
+    try:
+        from dotenv import load_dotenv  # type: ignore
+        load_dotenv()
+    except Exception:
+        pass
     return Settings()
-

@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
@@ -307,3 +308,11 @@ async def log_requests(request, call_next):
     finally:
         dur = (time.perf_counter() - start) * 1000.0
         logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
+
+
+# Static files (dashboard)
+try:
+    app.mount("/", StaticFiles(directory="public", html=True), name="public")
+except Exception:
+    # directory may not exist in some envs; ignore mount errors
+    pass
