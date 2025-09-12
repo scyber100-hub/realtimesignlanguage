@@ -18,7 +18,14 @@ _CLIPS = {
 
 DEFAULT_DUR = 650
 
-def compile_glosses(glosses: List[Tuple[str, float]], start_ms: int = 0, gap_ms: int = 60) -> Dict[str, Any]:
+_FACE_CLIPS = {
+    "BREAKING": {"clip": "FACE_ALERT", "dur_ms": 500},
+    "EARTHQUAKE": {"clip": "FACE_ALERT", "dur_ms": 700},
+    "TYPHOON": {"clip": "FACE_ALERT", "dur_ms": 700},
+}
+
+
+def compile_glosses(glosses: List[Tuple[str, float]], start_ms: int = 0, gap_ms: int = 60, include_aux_channels: bool = True) -> Dict[str, Any]:
     """
     glosses: [(gloss, confidence)]
     returns SignTimeline v0 JSON
@@ -34,6 +41,16 @@ def compile_glosses(glosses: List[Tuple[str, float]], start_ms: int = 0, gap_ms:
             "channel": "default",
             "confidence": round(float(conf), 3)
         })
+        if include_aux_channels:
+            face = _FACE_CLIPS.get(gloss)
+            if face:
+                events.append({
+                    "t_ms": t,
+                    "clip": face["clip"],
+                    "dur_ms": min(face["dur_ms"], spec["dur_ms"]),
+                    "channel": "face",
+                    "confidence": round(float(conf), 3)
+                })
         t += spec["dur_ms"] + gap_ms
     return {
         "id": f"signtimeline-{int(time.time()*1000)}",
@@ -42,4 +59,3 @@ def compile_glosses(glosses: List[Tuple[str, float]], start_ms: int = 0, gap_ms:
         "events": events,
         "meta": {"version": "v0", "generator": "sign_timeline.compile_glosses"}
     }
-

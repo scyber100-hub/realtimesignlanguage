@@ -64,6 +64,7 @@ AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
 - `docs/LATENCY_TUNING.md` 1초 지연 튜닝 체크리스트
 - `docs/UNITY_ADAPTER.md` Unity 연동 규약
  - `unity/` Unity용 C# 스크립트와 사용법
+ - `docs/UNITY_CHANNELS.md` 채널(손/얼굴/시선) 블렌딩 가이드
 
 API 요약(서버 포함)
 - `GET /healthz` 상태 확인

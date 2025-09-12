@@ -1,6 +1,7 @@
 from typing import List, Tuple, Dict, Optional
 import json
 from pathlib import Path
+from packages.nlp_norm import normalize_tokens
 
 # 매우 단순한 한국어 토크나이저(공백/기호 기준). 실제 서비스는 형태소 분석기 사용 권장.
 def tokenize_ko(text: str) -> List[str]:
@@ -78,7 +79,8 @@ def load_overlay_lexicon(path: str | Path) -> Optional[Dict[str, str]]:
 
 def ko_to_gloss(tokens: List[str]) -> List[Tuple[str, float]]:
     glosses: List[Tuple[str, float]] = []
-    for t in tokens:
+    norm_tokens = normalize_tokens(tokens)
+    for t in norm_tokens:
         g = _OVERLAY.get(t) or _LEXICON.get(t)
         if g:
             glosses.append((g, 0.9))
@@ -87,12 +89,8 @@ def ko_to_gloss(tokens: List[str]) -> List[Tuple[str, float]]:
             # 숫자 규칙(간단): "12시" → NUM_12 + HOUR
             if t.isdigit():
                 glosses.append((f"NUM_{t}", 0.85))
-            elif t.endswith("시") and t[:-1].isdigit():
-                glosses.append((f"NUM_{t[:-1]}", 0.85))
-                glosses.append(("HOUR", 0.85))
-            elif t.endswith("분") and t[:-1].isdigit():
-                glosses.append((f"NUM_{t[:-1]}", 0.85))
-                glosses.append(("MINUTE", 0.85))
+            elif t.startswith("NUM_"):
+                glosses.append((t, 0.85))
             else:
                 glosses.append((t.upper(), 0.5))
     # 간단한 불용어/어순 조정은 추후 추가
