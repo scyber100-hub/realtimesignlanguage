@@ -210,6 +210,7 @@
             document.getElementById('ing_rate').textContent = s.ingest_rate_per_sec_1m ?? 0;
             document.getElementById('last_lat').textContent = s.last_ingest_to_bc_ms ?? '-';
             document.getElementById('sess_count').textContent = s.session_count ?? 0;
+            if (document.getElementById('rl_total')) document.getElementById('rl_total').textContent = s.ingest_rate_limited_total ?? 0;
             document.getElementById('ws_clients').textContent = s.ws_clients ?? 0;
             if (s.latency_ms){
               document.getElementById('p50').textContent = s.latency_ms.p50 ?? '-';

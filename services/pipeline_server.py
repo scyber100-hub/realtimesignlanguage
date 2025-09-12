@@ -792,6 +792,17 @@ async def sessions_full(_: None = Depends(require_api_key)):
             preview = (txt[:40] + '…') if len(txt) > 40 else txt
         except Exception:
             preview = ''
+        # recent replace ratio for this session from RECENT_EVENTS
+        try:
+            if isinstance(RECENT_EVENTS, list):
+                evs = [x for x in RECENT_EVENTS if x.get('session_id') == sid]
+            else:
+                evs = [x for x in list(RECENT_EVENTS) if x.get('session_id') == sid]
+            total_e = len(evs)
+            rep_e = len([x for x in evs if x.get('type') == 'timeline.replace'])
+            rep_ratio = round(rep_e/total_e, 3) if total_e else 0
+        except Exception:
+            rep_ratio = 0
         items.append({
             "session_id": sid,
             "text_len": len(st.text or ""),
@@ -801,6 +812,7 @@ async def sessions_full(_: None = Depends(require_api_key)):
             "last_update_ms": getattr(st, 'last_update_ms', 0),
             "meta": getattr(st, 'meta', {}),
             "last_text_preview": preview,
+            "replace_ratio_recent": rep_ratio,
         })
     return {"count": len(items), "items": items}
 
