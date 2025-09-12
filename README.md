@@ -85,6 +85,8 @@ API 요약(서버 포함)
 - `LOG_LEVEL`: INFO/DEBUG 등 로그 레벨
 - `ENABLE_METRICS`: `1`(기본)/`0`
 - `LEXICON_PATH`: 시작 시 로드할 오버레이 사전(JSON) 경로
+- `INCLUDE_AUX_CHANNELS`: face/gaze 보조 채널 주입 on/off (기본 1)
+- `MAX_INGEST_RPS`: 세션당 WS 인입 메시지 초당 허용 수(기본 20)
 
 도메인 사전(핫 리로드)
 - `POST /lexicon/update { items: { "한국": "KOREA", ... } }`

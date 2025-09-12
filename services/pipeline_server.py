@@ -81,6 +81,7 @@ class SessionState(BaseModel):
     base_id: Optional[str] = None
     start_ms: int = 0
     gap_ms: int = 60
+    recent_ms: List[int] = []
 
 sessions: Dict[str, SessionState] = {}
 
@@ -271,6 +272,15 @@ async def ws_ingest(ws: WebSocket):
             if not st:
                 st = SessionState()
                 sessions[payload.session_id] = st
+            # rate limiting per session
+            now_ms = int(time.time() * 1000)
+            window_ms = 1000
+            st.recent_ms = [t for t in st.recent_ms if now_ms - t <= window_ms]
+            if len(st.recent_ms) >= max(1, settings.max_ingest_rps):
+                RATE_LIMITED.inc()
+                await ws.send_json({"ok": False, "rate_limited": True, "session_id": payload.session_id})
+                continue
+            st.recent_ms.append(now_ms)
             if payload.start_ms is not None:
                 st.start_ms = int(payload.start_ms)
             if payload.gap_ms is not None:
@@ -331,7 +341,8 @@ async def ws_ingest(ws: WebSocket):
             st.events = new_timeline["events"]
 
             # 요청자에게도 ack
-            await ws.send_json({"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final"})
+            proc_ms = int((time.perf_counter() - start) * 1000)
+            await ws.send_json({"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final", "proc_ms": proc_ms})
     except WebSocketDisconnect:
         pass
     except Exception:

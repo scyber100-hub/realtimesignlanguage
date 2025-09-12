@@ -13,6 +13,7 @@ class Settings:
     enable_metrics: bool = os.getenv("ENABLE_METRICS", "1") == "1"
     lexicon_path: str | None = os.getenv("LEXICON_PATH")
     include_aux_channels: bool = os.getenv("INCLUDE_AUX_CHANNELS", "1") == "1"
+    max_ingest_rps: int = int(os.getenv("MAX_INGEST_RPS", "20"))
 
 
 @lru_cache
