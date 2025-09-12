@@ -96,6 +96,8 @@ class SessionState(BaseModel):
     gap_ms: int = 60
     recent_ms: List[int] = []
     last_update_ms: int = 0
+    meta: Dict[str, Any] = {}
+    last_text: str = ""
 
 sessions: Dict[str, SessionState] = {}
 
@@ -360,6 +362,9 @@ async def _process_stream_in(payload: StreamIn):
     if payload.gap_ms is not None:
         st.gap_ms = int(payload.gap_ms)
 
+    # duplicate suppression for partial streams
+    if payload.type == "partial" and payload.text == st.last_text:
+        return {"ok": True, "session_id": payload.session_id, "is_final": False}
     st.text = payload.text
     tokens = tokenize_ko(st.text)
     glosses = ko_to_gloss(tokens)
@@ -398,6 +403,7 @@ async def _process_stream_in(payload: StreamIn):
         TIMELINE_BC.inc()
         stats.on_replace()
     st.events = new_timeline["events"]
+    st.last_text = payload.text
     return {"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final"}
 
 
@@ -900,6 +906,10 @@ async def ws_asr(ws: WebSocket):
                     payload = StreamIn(**data)
                     if not session_id:
                         session_id = payload.session_id
+                        # store ASR meta on session
+                        st = sessions.get(session_id) or SessionState()
+                        st.meta.update({"model": model, "device": device, "compute": compute, "beam_size": beam_size, "chunk_ms": chunk_ms})
+                        sessions[session_id] = st
                     res = await _process_stream_in(payload)
                     await ws.send_json(res)
                 except Exception:

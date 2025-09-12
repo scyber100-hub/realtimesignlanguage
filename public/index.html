@@ -51,6 +51,7 @@
   </div>
   <canvas id="hist" width="900" height="120" style="border:1px solid #333; margin-top:6px;"></canvas>
   <canvas id="spark" width="900" height="60" style="border:1px solid #333; margin-top:6px;"></canvas>
+  <canvas id="repSpark" width="900" height="60" style="border:1px solid #333; margin-top:6px;"></canvas>
   <div class="row">
     <button id="wsconnect">Connect WS</button>
     <button id="wsdisconnect">Disconnect WS</button>
@@ -121,6 +122,8 @@
       const hctx = hist.getContext('2d');
       const spark = document.getElementById('spark');
       const sctx = spark.getContext('2d');
+      const repSpark = document.getElementById('repSpark');
+      const rctx = repSpark.getContext('2d');
       let zero = null;
       function drawTimeline(events){
         if(!events) return;
@@ -174,6 +177,21 @@
         sctx.stroke();
         sctx.fillStyle = '#aaa';
         sctx.fillText('recent latency sparkline', 10, 12);
+      }
+      function drawRepSpark(values){
+        if(!values || values.length === 0) return;
+        rctx.clearRect(0,0,repSpark.width,repSpark.height);
+        const w = repSpark.width, h = repSpark.height;
+        rctx.strokeStyle = '#ff66cc';
+        rctx.beginPath();
+        for(let i=0;i<values.length;i++){
+          const x = Math.round((i/(values.length-1))*(w-10))+5;
+          const y = h - 5 - Math.round(values[i]*(h-10));
+          if(i===0) rctx.moveTo(x,y); else rctx.lineTo(x,y);
+        }
+        rctx.stroke();
+        rctx.fillStyle = '#aaa';
+        rctx.fillText('recent replace ratio', 10, 12);
       }
 
       ws.onmessage = (ev) => {
@@ -341,6 +359,7 @@
       log('POST /sessions/reset => ' + JSON.stringify(data));
     };
 
+    const repValues = [];
     async function loadEvents(){
       const headers = {};
       const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
@@ -357,6 +376,10 @@
       // fetch summary
       const sum = await (await fetch(`/events/summary?n=${n}`, { headers })).json();
       document.getElementById('evSummary').textContent = `summary: total=${sum.total} replace=${sum.replaces} ratio=${sum.ratio}`;
+      // update rep spark values (keep last 60)
+      repValues.push(sum.ratio);
+      if (repValues.length > 60) repValues.shift();
+      drawRepSpark(repValues);
     }
     document.getElementById('evFetch').onclick = loadEvents;
 
