@@ -157,6 +157,8 @@ def require_api_key(x_api_key: str | None = Header(default=None)):
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 TIMELINE_LOG = LOG_DIR / "timeline.log"
+VERS_DIR = Path("lexicon/versions")
+VERS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _log_timeline(evt_type: str, payload: Dict[str, Any]):
@@ -514,5 +516,55 @@ async def lexicon_upload(file: UploadFile = File(...), _: None = Depends(require
             raise ValueError("uploaded JSON must be an object {ko: GLOSS}")
         set_overlay_lexicon(obj)
         return {"ok": True, "size": len(obj)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class LexiconSnapshotReq(BaseModel):
+    note: Optional[str] = None
+
+
+@app.post("/lexicon/snapshot")
+async def lexicon_snapshot(req: LexiconSnapshotReq, _: None = Depends(require_api_key)):
+    from packages.ksl_rules.rules import _OVERLAY  # type: ignore
+    ts = int(time.time()*1000)
+    name = f"overlay-{ts}.json"
+    path = VERS_DIR / name
+    data = {"_meta": {"ts": ts, "note": req.note or ""}, "items": _OVERLAY}
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "name": name}
+
+
+@app.get("/lexicon/versions")
+async def lexicon_versions(_: None = Depends(require_api_key)):
+    items = []
+    for p in sorted(VERS_DIR.glob("*.json")):
+        try:
+            stat = p.stat()
+            items.append({"name": p.name, "mtime_ms": int(stat.st_mtime*1000), "size": stat.st_size})
+        except Exception:
+            continue
+    return {"count": len(items), "items": items}
+
+
+class LexiconRollbackReq(BaseModel):
+    name: str
+
+
+@app.post("/lexicon/rollback")
+async def lexicon_rollback(req: LexiconRollbackReq, _: None = Depends(require_api_key)):
+    p = VERS_DIR / req.name
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="version not found")
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        items = obj.get("items") if isinstance(obj, dict) else None
+        if not isinstance(items, dict):
+            # backwards compatibility: allow plain dict file
+            items = obj if isinstance(obj, dict) else None
+        if not isinstance(items, dict):
+            raise ValueError("invalid snapshot format")
+        set_overlay_lexicon(items)
+        return {"ok": True, "name": req.name, "size": len(items)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

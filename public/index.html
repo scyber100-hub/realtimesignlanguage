@@ -17,6 +17,9 @@
 <body>
   <h1>Realtime KOR→KSL Timeline <span class="badge" id="status">disconnected</span></h1>
   <div class="row">
+    <input id="apikey" type="text" placeholder="x-api-key (optional)" style="width:260px;"/>
+  </div>
+  <div class="row">
     <input id="text" type="text" placeholder="텍스트 입력 (예: 안녕하세요 한국 날씨)"/>
     <button id="send">POST /ingest_text</button>
   </div>
@@ -45,8 +48,17 @@
   <div class="row">
     <button id="lexGet">GET /lexicon</button>
     <button id="lexSet">POST /lexicon/update</button>
+    <button id="lexSnap">POST /lexicon/snapshot</button>
+    <input id="lexNote" type="text" placeholder="snapshot note (optional)"/>
   </div>
   <textarea id="lexArea" rows="6" style="width:900px; font-family:monospace;"></textarea>
+  <div class="row">
+    <input id="lexFile" type="file" accept="application/json"/>
+    <button id="lexUpload">POST /lexicon/upload</button>
+    <button id="lexList">GET /lexicon/versions</button>
+    <input id="lexVer" type="text" placeholder="overlay-*.json"/>
+    <button id="lexRollback">POST /lexicon/rollback</button>
+  </div>
 
   <h2 style="margin-top:16px; font-size:16px;">Sessions</h2>
   <div class="row">
@@ -148,9 +160,16 @@
     document.getElementById('wsconnect').onclick = connect;
     document.getElementById('wsdisconnect').onclick = disconnect;
 
+    const getHeaders = () => {
+      const h = { 'content-type': 'application/json' };
+      const k = document.getElementById('apikey').value;
+      if (k) h['x-api-key'] = k;
+      return h;
+    };
+
     document.getElementById('send').onclick = async () => {
       const text = document.getElementById('text').value || '안녕하세요 한국 날씨';
-      const res = await fetch('/ingest_text', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ text })});
+      const res = await fetch('/ingest_text', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ text })});
       const data = await res.json();
       log('POST /ingest_text => ' + JSON.stringify(data));
     };
@@ -160,7 +179,7 @@
 
     // Lexicon handlers
     document.getElementById('lexGet').onclick = async () => {
-      const res = await fetch('/lexicon');
+      const res = await fetch('/lexicon', { headers: getHeaders()});
       const data = await res.json();
       document.getElementById('lexArea').value = JSON.stringify(data.items || {}, null, 2);
       log('GET /lexicon');
@@ -169,12 +188,41 @@
       let txt = document.getElementById('lexArea').value;
       try {
         const obj = JSON.parse(txt || '{}');
-        const res = await fetch('/lexicon/update', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ items: obj })});
+        const res = await fetch('/lexicon/update', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ items: obj })});
         const data = await res.json();
         log('POST /lexicon/update => ' + JSON.stringify(data));
       } catch (e) {
         alert('Invalid JSON');
       }
+    };
+    document.getElementById('lexSnap').onclick = async () => {
+      const note = document.getElementById('lexNote').value || '';
+      const res = await fetch('/lexicon/snapshot', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ note })});
+      const data = await res.json();
+      log('POST /lexicon/snapshot => ' + JSON.stringify(data));
+    };
+    document.getElementById('lexUpload').onclick = async () => {
+      const f = document.getElementById('lexFile').files[0];
+      if (!f) { alert('Select a JSON file'); return; }
+      const fd = new FormData();
+      fd.append('file', f);
+      const headers = {};
+      const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
+      const res = await fetch('/lexicon/upload', { method: 'POST', headers, body: fd });
+      const data = await res.json();
+      log('POST /lexicon/upload => ' + JSON.stringify(data));
+    };
+    document.getElementById('lexList').onclick = async () => {
+      const res = await fetch('/lexicon/versions', { headers: getHeaders()});
+      const data = await res.json();
+      log('GET /lexicon/versions => ' + JSON.stringify(data));
+    };
+    document.getElementById('lexRollback').onclick = async () => {
+      const name = document.getElementById('lexVer').value;
+      if (!name) { alert('Enter version file name'); return; }
+      const res = await fetch('/lexicon/rollback', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ name })});
+      const data = await res.json();
+      log('POST /lexicon/rollback => ' + JSON.stringify(data));
     };
 
     // Sessions handlers
