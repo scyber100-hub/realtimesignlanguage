@@ -119,6 +119,16 @@ async def get_stats(_: None = Depends(require_api_key)):
     return stats.snapshot()
 
 
+@app.get("/config")
+async def get_config(_: None = Depends(require_api_key)):
+    return {
+        "version": settings.version,
+        "include_aux_channels": settings.include_aux_channels,
+        "max_ingest_rps": settings.max_ingest_rps,
+        "enable_metrics": settings.enable_metrics,
+    }
+
+
 class TextIn(BaseModel):
     text: str
 

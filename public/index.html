@@ -18,6 +18,8 @@
   <h1>Realtime KOR→KSL Timeline <span class="badge" id="status">disconnected</span></h1>
   <div class="row">
     <input id="apikey" type="text" placeholder="x-api-key (optional)" style="width:260px;"/>
+    <button id="cfgBtn">GET /config</button>
+    <span id="cfgOut" class="badge"></span>
   </div>
   <div class="row">
     <input id="text" type="text" placeholder="텍스트 입력 (예: 안녕하세요 한국 날씨)"/>
@@ -199,6 +201,16 @@
 
     // auto-connect
     connect();
+
+    // Config
+    document.getElementById('cfgBtn').onclick = async () => {
+      const headers = {};
+      const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
+      const res = await fetch('/config', { headers });
+      const data = await res.json();
+      document.getElementById('cfgOut').textContent = JSON.stringify(data);
+      log('GET /config => ' + JSON.stringify(data));
+    };
 
     // Lexicon handlers
     document.getElementById('lexGet').onclick = async () => {
