@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/sign_timeline.schema.json",
+  "title": "SignTimelineV0",
+  "type": "object",
+  "required": ["id", "created_ms", "events"],
+  "properties": {
+    "id": {"type": "string"},
+    "created_ms": {"type": "integer", "minimum": 0},
+    "lang": {"type": "string", "default": "ko-KR->KSL"},
+    "meta": {"type": "object"},
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["t_ms", "clip", "dur_ms"],
+        "properties": {
+          "t_ms": {"type": "integer", "minimum": 0},
+          "clip": {"type": "string"},
+          "dur_ms": {"type": "integer", "minimum": 1},
+          "channel": {"type": "string", "enum": ["body", "hands", "face", "gaze", "default"], "default": "default"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "tags": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}
+
