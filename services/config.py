@@ -11,6 +11,7 @@ class Settings:
     api_key: str | None = os.getenv("API_KEY")
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     enable_metrics: bool = os.getenv("ENABLE_METRICS", "1") == "1"
+    lexicon_path: str | None = os.getenv("LEXICON_PATH")
 
 
 @lru_cache

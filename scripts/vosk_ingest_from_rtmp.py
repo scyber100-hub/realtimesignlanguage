@@ -52,7 +52,7 @@ async def run(args):
                     res = json.loads(rec.Result())
                     text = (res.get("text") or "").strip()
                     if text:
-                        msg = {"type": "final", "session_id": session_id, "text": text}
+                        msg = {"type": "final", "session_id": session_id, "text": text, "origin_ts": int(time.time()*1000)}
                         await ws.send(json.dumps(msg, ensure_ascii=False))
                         _ = await ws.recv()  # ack
                         last_partial = ""
@@ -61,7 +61,7 @@ async def run(args):
                     ptext = (res.get("partial") or "").strip()
                     if ptext and ptext != last_partial:
                         last_partial = ptext
-                        msg = {"type": "partial", "session_id": session_id, "text": ptext}
+                        msg = {"type": "partial", "session_id": session_id, "text": ptext, "origin_ts": int(time.time()*1000)}
                         await ws.send(json.dumps(msg, ensure_ascii=False))
                         _ = await ws.recv()
         finally:
@@ -79,4 +79,3 @@ if __name__ == "__main__":
     ap.add_argument("--session", default="ch1", help="Pipeline session id")
     args = ap.parse_args()
     asyncio.run(run(args))
-

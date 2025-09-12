@@ -55,7 +55,8 @@ async def run(args):
                 if text:
                     if text != last_text:
                         last_text = text
-                        msg = {"type": "partial", "session_id": session_id, "text": text}
+                        import time as _t
+                        msg = {"type": "partial", "session_id": session_id, "text": text, "origin_ts": int(_t.time()*1000)}
                         await ws.send(json.dumps(msg, ensure_ascii=False))
                         _ = await ws.recv()
 
@@ -72,4 +73,3 @@ if __name__ == "__main__":
     ap.add_argument("--hop_ms", type=int, default=400)
     args = ap.parse_args()
     asyncio.run(run(args))
-

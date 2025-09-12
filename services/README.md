@@ -32,6 +32,7 @@ pipeline-server (본 리포지토리 포함)
 - 엔드포인트:
   - GET /healthz → 상태 확인
   - GET /metrics → Prometheus 지표 노출
+  - GET /stats → 경량 런타임 통계(JSON)
   - POST /ingest_text { text, start_ms?, gap_ms?, id? } → SignTimeline 생성 및 WS 브로드캐스트
   - POST /text2gloss { text } → { gloss, conf }
   - POST /gloss2timeline { gloss[], conf?[], start_ms?, gap_ms? } → SignTimeline(JSON)
@@ -39,6 +40,7 @@ pipeline-server (본 리포지토리 포함)
   - WS /ws/timeline → 타임라인 push 수신
   - WS /ws/ingest → {type:"partial"|"final", session_id, text, start_ms?, gap_ms?} 증분 인입
     - 서버는 최초 full `timeline`, 이후 차이점부터 `timeline.replace`(from_t_ms 포함) 전송
+    - `origin_ts`(ms) 필드를 포함하면 ingest→broadcast 지연 히스토그램에 반영
 보안/설정
 - API 키(선택): `API_KEY` 설정 시 /ingest_text, /lexicon/update, /ws/ingest 보호
 - CORS_ALLOW_ORIGINS, LOG_LEVEL, ENABLE_METRICS 등은 README 참고

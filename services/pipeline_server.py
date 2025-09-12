@@ -13,7 +13,7 @@ from jsonschema import validate as jsonschema_validate, Draft202012Validator
 from pathlib import Path
 import os
 
-from packages.ksl_rules import tokenize_ko, ko_to_gloss, set_overlay_lexicon
+from packages.ksl_rules import tokenize_ko, ko_to_gloss, set_overlay_lexicon, load_overlay_lexicon
 from packages.sign_timeline import compile_glosses
 from services.config import get_settings
 import logging
@@ -85,10 +85,10 @@ class SessionState(BaseModel):
 sessions: Dict[str, SessionState] = {}
 
 # Metrics
-# Metrics
 REQ_LAT = Histogram("pipeline_request_latency_seconds", "Latency of API processing", labelnames=("endpoint",))
 TIMELINE_BC = Counter("timeline_broadcast_total", "Number of timeline messages broadcast")
 INGEST_MSG = Counter("ingest_messages_total", "Number of ingest messages", labelnames=("type",))
+INGEST_TO_BC_MS = Histogram("ingest_to_broadcast_ms", "Latency from ingest message to timeline broadcast in ms")
 
 # Load timeline schema for validation
 _SCHEMA_PATH = Path("schemas/sign_timeline.schema.json")
@@ -111,6 +111,11 @@ async def metrics():
         raise HTTPException(status_code=404)
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/stats")
+async def get_stats(_: None = Depends(require_api_key)):
+    return stats.snapshot()
 
 
 class TextIn(BaseModel):
@@ -216,6 +221,7 @@ class StreamIn(BaseModel):
     text: str
     start_ms: Optional[int] = None
     gap_ms: Optional[int] = None
+    origin_ts: Optional[int] = None  # client-side timestamp (ms)
 
 
 def _first_diff_index(a: List[str], b: List[str]) -> int:
@@ -298,6 +304,8 @@ async def ws_ingest(ws: WebSocket):
                 await manager.broadcast_json(out)
                 stats.on_timeline()
                 _log_timeline("timeline", out)
+                if payload.origin_ts:
+                    INGEST_TO_BC_MS.observe(max(0, int(time.time()*1000) - int(payload.origin_ts)))
                 TIMELINE_BC.inc()
             else:
                 out = {
@@ -312,6 +320,8 @@ async def ws_ingest(ws: WebSocket):
                 await manager.broadcast_json(out)
                 stats.on_timeline()
                 _log_timeline("timeline.replace", out)
+                if payload.origin_ts:
+                    INGEST_TO_BC_MS.observe(max(0, int(time.time()*1000) - int(payload.origin_ts)))
                 TIMELINE_BC.inc()
 
             st.events = new_timeline["events"]
@@ -331,6 +341,16 @@ async def ws_ingest(ws: WebSocket):
 async def _on_startup():
     # start stats broadcaster
     asyncio.create_task(_stats_broadcaster())
+    # optional overlay lexicon load from file
+    try:
+        lp = getattr(settings, 'lexicon_path', None)
+        if lp:
+            p = Path(lp)
+            if p.exists():
+                load_overlay_lexicon(p)
+                logger.info(f"Loaded overlay lexicon from {p}")
+    except Exception as e:
+        logger.warning(f"Lexicon load failed: {e}")
 class LexiconUpdate(BaseModel):
     items: Dict[str, str]
 

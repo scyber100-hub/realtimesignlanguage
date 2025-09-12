@@ -19,14 +19,15 @@ async def main():
         parts.append(" ".join(acc))
 
     async with websockets.connect(args.url, ping_interval=20) as ws:
+        import time
         for i, p in enumerate(parts):
-            msg = {"type": "partial", "session_id": args.session, "text": p}
+            msg = {"type": "partial", "session_id": args.session, "text": p, "origin_ts": int(time.time()*1000)}
             await ws.send(json.dumps(msg, ensure_ascii=False))
             ack = await ws.recv()
             print("SENT PARTIAL:", p, "ACK:", ack)
             await asyncio.sleep(args.delay_ms / 1000.0)
         # final
-        msg = {"type": "final", "session_id": args.session, "text": parts[-1] if parts else ""}
+        msg = {"type": "final", "session_id": args.session, "text": parts[-1] if parts else "", "origin_ts": int(time.time()*1000)}
         await ws.send(json.dumps(msg, ensure_ascii=False))
         ack = await ws.recv()
         print("SENT FINAL ACK:", ack)
@@ -34,4 +35,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
