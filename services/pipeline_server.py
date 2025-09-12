@@ -11,6 +11,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from fastapi.responses import Response
 from jsonschema import validate as jsonschema_validate, Draft202012Validator
 from pathlib import Path
+import os
 
 from packages.ksl_rules import tokenize_ko, ko_to_gloss, set_overlay_lexicon
 from packages.sign_timeline import compile_glosses
@@ -84,6 +85,7 @@ class SessionState(BaseModel):
 sessions: Dict[str, SessionState] = {}
 
 # Metrics
+# Metrics
 REQ_LAT = Histogram("pipeline_request_latency_seconds", "Latency of API processing", labelnames=("endpoint",))
 TIMELINE_BC = Counter("timeline_broadcast_total", "Number of timeline messages broadcast")
 INGEST_MSG = Counter("ingest_messages_total", "Number of ingest messages", labelnames=("type",))
@@ -146,6 +148,27 @@ def require_api_key(x_api_key: str | None = Header(default=None)):
         raise HTTPException(status_code=401, detail="invalid api key")
 
 
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+TIMELINE_LOG = LOG_DIR / "timeline.log"
+
+
+def _log_timeline(evt_type: str, payload: Dict[str, Any]):
+    try:
+        rec = {
+            "ts": int(time.time() * 1000),
+            "type": evt_type,
+            "session_id": payload.get("session_id"),
+            "id": payload.get("data", {}).get("id") if "data" in payload else payload.get("id"),
+            "from_t_ms": payload.get("from_t_ms"),
+            "event_count": len(payload.get("data", {}).get("events", [])) if "data" in payload else len(payload.get("events", [])),
+        }
+        with TIMELINE_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.debug(f"timeline log error: {e}")
+
+
 @app.post("/ingest_text")
 async def ingest_text(payload: IngestText, _: None = Depends(require_api_key)):
     start = time.perf_counter()
@@ -154,7 +177,9 @@ async def ingest_text(payload: IngestText, _: None = Depends(require_api_key)):
     timeline = compile_glosses(glosses, start_ms=payload.start_ms, gap_ms=payload.gap_ms)
     if payload.id:
         timeline["id"] = payload.id
-    await manager.broadcast_json({"type": "timeline", "data": timeline})
+    payload = {"type": "timeline", "data": timeline}
+    await manager.broadcast_json(payload)
+    _log_timeline("timeline", payload)
     TIMELINE_BC.inc()
     REQ_LAT.labels("ingest_text").observe(time.perf_counter() - start)
     return {"ok": True, "timeline": timeline}
@@ -253,14 +278,16 @@ async def ws_ingest(ws: WebSocket):
 
             # 메시지 전송: 최초에는 full timeline, 이후에는 replace
             if not st.events:
-                await manager.broadcast_json({
+                out = {
                     "type": "timeline",
                     "session_id": payload.session_id,
                     "data": new_timeline,
-                })
+                }
+                await manager.broadcast_json(out)
+                _log_timeline("timeline", out)
                 TIMELINE_BC.inc()
             else:
-                await manager.broadcast_json({
+                out = {
                     "type": "timeline.replace",
                     "session_id": payload.session_id,
                     "from_t_ms": from_t,
@@ -268,7 +295,9 @@ async def ws_ingest(ws: WebSocket):
                         "id": st.base_id,
                         "events": new_timeline["events"][start_idx:end_idx],
                     },
-                })
+                }
+                await manager.broadcast_json(out)
+                _log_timeline("timeline.replace", out)
                 TIMELINE_BC.inc()
 
             st.events = new_timeline["events"]

@@ -24,6 +24,12 @@ _FACE_CLIPS = {
     "TYPHOON": {"clip": "FACE_ALERT", "dur_ms": 700},
 }
 
+_GAZE_CLIPS = {
+    "BREAKING": {"clip": "GAZE_FORWARD", "dur_ms": 500},
+    "EARTHQUAKE": {"clip": "GAZE_FORWARD", "dur_ms": 700},
+    "TYPHOON": {"clip": "GAZE_FORWARD", "dur_ms": 700},
+}
+
 
 def compile_glosses(glosses: List[Tuple[str, float]], start_ms: int = 0, gap_ms: int = 60, include_aux_channels: bool = True) -> Dict[str, Any]:
     """
@@ -49,6 +55,15 @@ def compile_glosses(glosses: List[Tuple[str, float]], start_ms: int = 0, gap_ms:
                     "clip": face["clip"],
                     "dur_ms": min(face["dur_ms"], spec["dur_ms"]),
                     "channel": "face",
+                    "confidence": round(float(conf), 3)
+                })
+            gaze = _GAZE_CLIPS.get(gloss)
+            if gaze:
+                events.append({
+                    "t_ms": t,
+                    "clip": gaze["clip"],
+                    "dur_ms": min(gaze["dur_ms"], spec["dur_ms"]),
+                    "channel": "gaze",
                     "confidence": round(float(conf), 3)
                 })
         t += spec["dur_ms"] + gap_ms
