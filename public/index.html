@@ -28,6 +28,12 @@
     <div>ingest rate(1m): <b id="ing_rate">0</b>/s</div>
     <div>last ingest→broadcast: <b id="last_lat">-</b> ms</div>
   </div>
+  <div class="row" style="gap:24px;">
+    <div>p50: <b id="p50">-</b> ms</div>
+    <div>p90: <b id="p90">-</b> ms</div>
+    <div>p99: <b id="p99">-</b> ms</div>
+  </div>
+  <canvas id="hist" width="900" height="120" style="border:1px solid #333; margin-top:6px;"></canvas>
   <div class="row">
     <button id="wsconnect">Connect WS</button>
     <button id="wsdisconnect">Disconnect WS</button>
@@ -68,6 +74,8 @@
       ws.onerror = (e) => { log('WS error'); };
       const tl = document.getElementById('timeline');
       const ctx = tl.getContext('2d');
+      const hist = document.getElementById('hist');
+      const hctx = hist.getContext('2d');
       let zero = null;
       function drawTimeline(events){
         if(!events) return;
@@ -85,6 +93,25 @@
         ctx.fillText('face', 5, 20); ctx.fillText('gaze', 5, 60); ctx.fillText('default', 5, 100);
       }
 
+      function drawHist(h){
+        if(!h || !h.hist) return;
+        const buckets = h.hist.buckets;
+        const counts = h.hist.counts;
+        const maxC = Math.max(1, ...counts);
+        hctx.clearRect(0,0,hist.width,hist.height);
+        const barW = Math.max(8, Math.floor((hist.width-20)/counts.length)-2);
+        let x = 10;
+        for(let i=0;i<counts.length;i++){
+          const c = counts[i];
+          const hpx = Math.round((c/maxC) * (hist.height-20));
+          hctx.fillStyle = '#7fbf7f';
+          hctx.fillRect(x, hist.height-10-hpx, barW, hpx);
+          x += barW+2;
+        }
+        hctx.fillStyle = '#aaa';
+        hctx.fillText('latency histogram (ms buckets)', 10, 12);
+      }
+
       ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
@@ -96,6 +123,12 @@
             document.getElementById('ing_f').textContent = s.ingest_final_total ?? 0;
             document.getElementById('ing_rate').textContent = s.ingest_rate_per_sec_1m ?? 0;
             document.getElementById('last_lat').textContent = s.last_ingest_to_bc_ms ?? '-';
+            if (s.latency_ms){
+              document.getElementById('p50').textContent = s.latency_ms.p50 ?? '-';
+              document.getElementById('p90').textContent = s.latency_ms.p90 ?? '-';
+              document.getElementById('p99').textContent = s.latency_ms.p99 ?? '-';
+              drawHist(s.latency_ms);
+            }
           } else if (data.type === 'timeline' && data.data) {
             drawTimeline(data.data.events);
             log(JSON.stringify(data));

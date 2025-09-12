@@ -429,6 +429,7 @@ class Stats:
         self._timeline_ts = deque(maxlen=5000)
         self._ingest_ts = deque(maxlen=5000)
         self.last_ingest_to_bc_ms: int | None = None
+        self._lat_ms = deque(maxlen=5000)
 
     def on_timeline(self):
         from time import time as now
@@ -446,6 +447,7 @@ class Stats:
     def on_latency(self, ms: int):
         try:
             self.last_ingest_to_bc_ms = int(ms)
+            self._lat_ms.append(int(ms))
         except Exception:
             pass
 
@@ -455,6 +457,30 @@ class Stats:
         window_ms = 60_000
         timeline_rate = len([t for t in self._timeline_ts if now - t <= window_ms]) / 60.0
         ingest_rate = len([t for t in self._ingest_ts if now - t <= window_ms]) / 60.0
+        # latency percentiles/histogram (simple bins)
+        lats = list(self._lat_ms)
+        p50 = p90 = p99 = None
+        hist = None
+        if lats:
+            sl = sorted(lats)
+            def pct(p):
+                import math
+                if not sl:
+                    return None
+                k = min(len(sl)-1, max(0, int(math.ceil(p/100.0*len(sl))-1)))
+                return sl[k]
+            p50 = pct(50)
+            p90 = pct(90)
+            p99 = pct(99)
+            # fixed buckets in ms
+            buckets = [100,200,300,400,600,800,1000,1500,2000,3000]
+            counts = [0]*(len(buckets)+1)
+            for v in lats:
+                idx = 0
+                while idx < len(buckets) and v > buckets[idx]:
+                    idx += 1
+                counts[idx] += 1
+            hist = {"buckets": buckets, "counts": counts}
         return {
             "timeline_broadcast_total": self.timeline_total,
             "timeline_rate_per_sec_1m": round(timeline_rate, 3),
@@ -462,6 +488,7 @@ class Stats:
             "ingest_final_total": self.ingest_final,
             "ingest_rate_per_sec_1m": round(ingest_rate, 3),
             "last_ingest_to_bc_ms": self.last_ingest_to_bc_ms,
+            "latency_ms": {"p50": p50, "p90": p90, "p99": p99, "hist": hist},
         }
 
 
