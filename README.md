@@ -41,6 +41,11 @@ AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
 - 실행: `python scripts/vosk_ingest_from_rtmp.py --model <vosk_model_dir> --rtmp rtmp://origin/live/stream`
 - 동작: FFmpeg로 오디오 추출→Vosk 실시간 인식→/ws/ingest로 partial/final 전송
 
+오프라인/온프레 ASR(Whisper, 선택)
+- 준비: `pip install faster-whisper` 및 FFmpeg 설치
+- 실행: `python scripts/whisper_ingest_from_rtmp.py --model base --rtmp rtmp://origin/live/stream`
+- 동작: FFmpeg 오디오→chunk 단위 Whisper 추론→partial 전송(간단 스트리밍)
+
 폴더 구조
 - `services/` 서비스 경계 문서 및 스텁
 - `packages/` 규칙/타임라인 생성 라이브러리(파이썬)

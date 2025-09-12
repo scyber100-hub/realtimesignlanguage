@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -189,6 +189,27 @@ def _first_diff_index(a: List[str], b: List[str]) -> int:
     return n
 
 
+def _diff_window(old: List[str], new: List[str]) -> Tuple[int, int]:
+    """
+    returns (start_index_in_new, end_index_in_new_exclusive) to replace
+    calculates common prefix and suffix to minimize replacement window
+    """
+    # common prefix
+    p = 0
+    nmin = min(len(old), len(new))
+    while p < nmin and old[p] == new[p]:
+        p += 1
+    # common suffix (avoid overlap with prefix)
+    s = 0
+    while s < (len(old) - p) and s < (len(new) - p) and old[len(old) - 1 - s] == new[len(new) - 1 - s]:
+        s += 1
+    start = p
+    end = len(new) - s
+    if end < start:
+        end = start
+    return start, end
+
+
 @app.websocket("/ws/ingest")
 async def ws_ingest(ws: WebSocket):
     # optional API key via query param 'key'
@@ -221,11 +242,11 @@ async def ws_ingest(ws: WebSocket):
 
             old_clips = [e["clip"] for e in st.events]
             new_clips = [e["clip"] for e in new_timeline["events"]]
-            diff_idx = _first_diff_index(old_clips, new_clips)
+            start_idx, end_idx = _diff_window(old_clips, new_clips)
 
             # 교체 시작 시간 산정
-            if diff_idx < len(new_timeline["events"]):
-                from_t = new_timeline["events"][diff_idx]["t_ms"] if diff_idx < len(new_timeline["events"]) else 0
+            if start_idx < len(new_timeline["events"]):
+                from_t = new_timeline["events"][start_idx]["t_ms"]
             else:
                 from_t = new_timeline["events"][-1]["t_ms"] if new_timeline["events"] else 0
 
@@ -244,7 +265,7 @@ async def ws_ingest(ws: WebSocket):
                     "from_t_ms": from_t,
                     "data": {
                         "id": st.base_id,
-                        "events": new_timeline["events"][diff_idx:],
+                        "events": new_timeline["events"][start_idx:end_idx],
                     },
                 })
                 TIMELINE_BC.inc()
@@ -268,3 +289,21 @@ class LexiconUpdate(BaseModel):
 async def lexicon_update(payload: LexiconUpdate, _: None = Depends(require_api_key)):
     set_overlay_lexicon(payload.items)
     return {"ok": True, "size": len(payload.items)}
+
+
+@app.get("/lexicon")
+async def lexicon_get(_: None = Depends(require_api_key)):
+    # 보안을 위해 오버레이 크기만 공개, 상세는 관리 용도로 반환
+    from packages.ksl_rules.rules import _OVERLAY  # type: ignore
+    return {"size": len(_OVERLAY), "items": _OVERLAY}
+
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        dur = (time.perf_counter() - start) * 1000.0
+        logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
