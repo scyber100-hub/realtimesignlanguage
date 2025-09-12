@@ -43,6 +43,7 @@
     <div>last ingest→broadcast: <b id="last_lat">-</b> ms</div>
     <div>sessions: <b id="sess_count">0</b></div>
     <div>ws clients: <b id="ws_clients">0</b></div>
+    <button id="evClear">POST /events/clear</button>
   </div>
   <div class="row" style="gap:24px;">
     <div>p50: <b id="p50">-</b> ms</div>
@@ -85,7 +86,7 @@
     <input id="sessInt" type="number" value="5" min="1" style="width:60px;"/>s
   </div>
   <table id="sessTable" border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px; min-width:600px;">
-    <thead><tr><th>session</th><th>events</th><th>text_len</th><th>last_update_ms</th><th>meta</th></tr></thead>
+    <thead><tr><th>session</th><th>events</th><th>text_len</th><th>last_update_ms</th><th>last_text</th><th>meta</th></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -350,7 +351,8 @@
       rows.forEach(r => {
         const tr = document.createElement('tr');
         const meta = r.meta ? JSON.stringify(r.meta) : '';
-        tr.innerHTML = `<td>${r.session_id}</td><td>${r.events}</td><td>${r.text_len}</td><td>${r.last_update_ms||''}</td><td>${meta}</td>`;
+        const lastTxt = r.last_text_preview || '';
+        tr.innerHTML = `<td>${r.session_id}</td><td>${r.events}</td><td>${r.text_len}</td><td>${r.last_update_ms||''}</td><td>${lastTxt}</td><td>${meta}</td>`;
         tb.appendChild(tr);
       });
       log('GET /sessions_full => ' + JSON.stringify(data));
@@ -384,6 +386,12 @@
       drawRepSpark(repValues);
     }
     document.getElementById('evFetch').onclick = loadEvents;
+    document.getElementById('evClear').onclick = async () => {
+      const headers = getHeaders();
+      const res = await fetch('/events/clear', { method: 'POST', headers });
+      const data = await res.json();
+      log('POST /events/clear => ' + JSON.stringify(data));
+    };
 
     // auto refresh toggles
     let sessTimer = null, evTimer = null;

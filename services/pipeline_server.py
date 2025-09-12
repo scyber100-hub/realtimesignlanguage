@@ -212,6 +212,20 @@ async def events_summary(n: int = 100, session_id: Optional[str] = None, _: None
     return {"total": total, "replaces": replaces, "ratio": round(ratio, 3)}
 
 
+@app.post("/events/clear")
+async def events_clear(_: None = Depends(require_api_key)):
+    try:
+        if isinstance(RECENT_EVENTS, list):
+            RECENT_EVENTS.clear()
+        else:
+            # drain deque
+            for _ in range(len(RECENT_EVENTS)):
+                RECENT_EVENTS.popleft()
+        return {"ok": True}
+    except Exception:
+        return {"ok": False}
+
+
 class TextIn(BaseModel):
     text: str
 
@@ -359,6 +373,7 @@ async def _process_stream_in(payload: StreamIn):
     st.recent_ms = [t for t in st.recent_ms if now_ms - t <= window_ms]
     if len(st.recent_ms) >= max(1, settings.max_ingest_rps):
         RATE_LIMITED.inc()
+        stats.on_rate_limited()
         return {"ok": False, "rate_limited": True, "session_id": payload.session_id}
     st.recent_ms.append(now_ms)
     if payload.start_ms is not None:
@@ -642,6 +657,7 @@ class Stats:
         from collections import deque
         self.timeline_total = 0
         self.replace_total = 0
+        self.rate_limited_total = 0
         self.ingest_partial = 0
         self.ingest_final = 0
         self._timeline_ts = deque(maxlen=5000)
@@ -664,6 +680,9 @@ class Stats:
 
     def on_replace(self):
         self.replace_total += 1
+
+    def on_rate_limited(self):
+        self.rate_limited_total += 1
 
     def on_latency(self, ms: int):
         try:
@@ -710,6 +729,7 @@ class Stats:
             "timeline_rate_per_sec_1m": round(timeline_rate, 3),
             "timeline_replace_total": self.replace_total,
             "timeline_replace_ratio": (round(self.replace_total / self.timeline_total, 3) if self.timeline_total else 0),
+            "ingest_rate_limited_total": self.rate_limited_total,
             "ingest_partial_total": self.ingest_partial,
             "ingest_final_total": self.ingest_final,
             "ingest_rate_per_sec_1m": round(ingest_rate, 3),
@@ -766,6 +786,12 @@ async def _start_session_purger():
 async def sessions_full(_: None = Depends(require_api_key)):
     items = []
     for sid, st in sessions.items():
+        preview = ''
+        try:
+            txt = getattr(st, 'last_text', '') or ''
+            preview = (txt[:40] + '…') if len(txt) > 40 else txt
+        except Exception:
+            preview = ''
         items.append({
             "session_id": sid,
             "text_len": len(st.text or ""),
@@ -774,6 +800,7 @@ async def sessions_full(_: None = Depends(require_api_key)):
             "gap_ms": st.gap_ms,
             "last_update_ms": getattr(st, 'last_update_ms', 0),
             "meta": getattr(st, 'meta', {}),
+            "last_text_preview": preview,
         })
     return {"count": len(items), "items": items}
 
