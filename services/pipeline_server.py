@@ -153,6 +153,9 @@ async def get_config(_: None = Depends(require_api_key)):
 class ConfigUpdate(BaseModel):
     include_aux_channels: Optional[bool] = None
     max_ingest_rps: Optional[int] = None
+    latency_p90_warn_ms: Optional[int] = None
+    replace_ratio_warn: Optional[float] = None
+    rate_limit_ratio_warn: Optional[float] = None
 
 
 @app.post("/config/update")
@@ -168,6 +171,33 @@ async def update_config(req: ConfigUpdate, _: None = Depends(require_api_key)):
                 raise ValueError("max_ingest_rps must be >=1")
             settings.max_ingest_rps = v
             changed["max_ingest_rps"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.latency_p90_warn_ms is not None:
+        try:
+            v = int(req.latency_p90_warn_ms)
+            if v < 0:
+                raise ValueError("latency_p90_warn_ms must be >=0")
+            settings.latency_p90_warn_ms = v
+            changed["latency_p90_warn_ms"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.replace_ratio_warn is not None:
+        try:
+            v = float(req.replace_ratio_warn)
+            if v < 0 or v > 1:
+                raise ValueError("replace_ratio_warn must be in [0,1]")
+            settings.replace_ratio_warn = v
+            changed["replace_ratio_warn"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.rate_limit_ratio_warn is not None:
+        try:
+            v = float(req.rate_limit_ratio_warn)
+            if v < 0 or v > 1:
+                raise ValueError("rate_limit_ratio_warn must be in [0,1]")
+            settings.rate_limit_ratio_warn = v
+            changed["rate_limit_ratio_warn"] = v
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "changed": changed}

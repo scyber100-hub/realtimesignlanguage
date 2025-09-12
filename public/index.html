@@ -36,7 +36,7 @@
     <div>timeline total: <b id="tl_total">0</b></div>
     <div>timeline rate(1m): <b id="tl_rate">0</b>/s</div>
     <div>replace total: <b id="rep_total">0</b></div>
-    <div>replace ratio: <b id="rep_ratio">0</b></div>
+    <div>replace ratio: <span id="rep_ratio" class="badge">0</span></div>
     <div>ingest partial: <b id="ing_p">0</b></div>
     <div>ingest final: <b id="ing_f">0</b></div>
     <div>ingest rate(1m): <b id="ing_rate">0</b>/s</div>
@@ -204,11 +204,21 @@
             document.getElementById('tl_total').textContent = s.timeline_broadcast_total ?? 0;
             document.getElementById('tl_rate').textContent = s.timeline_rate_per_sec_1m ?? 0;
             document.getElementById('rep_total').textContent = s.timeline_replace_total ?? 0;
-            document.getElementById('rep_ratio').textContent = s.timeline_replace_ratio ?? 0;
+            (function(){
+              const repEl = document.getElementById('rep_ratio');
+              const repRatio = s.timeline_replace_ratio ?? 0;
+              repEl.textContent = repRatio;
+              repEl.style.background = repRatio > 0.5 ? '#ff9aa2' : '#c2f0c2';
+            })();
             document.getElementById('ing_p').textContent = s.ingest_partial_total ?? 0;
             document.getElementById('ing_f').textContent = s.ingest_final_total ?? 0;
             document.getElementById('ing_rate').textContent = s.ingest_rate_per_sec_1m ?? 0;
-            document.getElementById('last_lat').textContent = s.last_ingest_to_bc_ms ?? '-';
+            (function(){
+              const latEl = document.getElementById('last_lat');
+              const p90 = (s.latency_ms && s.latency_ms.p90) || 0;
+              latEl.textContent = s.last_ingest_to_bc_ms ?? '-';
+              latEl.style.background = p90 > 1200 ? '#ff9aa2' : '#c2f0c2';
+            })();
             document.getElementById('sess_count').textContent = s.session_count ?? 0;
             if (document.getElementById('rl_total')) document.getElementById('rl_total').textContent = s.ingest_rate_limited_total ?? 0;
             document.getElementById('ws_clients').textContent = s.ws_clients ?? 0;
