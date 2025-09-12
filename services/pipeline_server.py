@@ -323,6 +323,65 @@ class StreamIn(BaseModel):
     origin_ts: Optional[int] = None  # client-side timestamp (ms)
 
 
+async def _process_stream_in(payload: StreamIn):
+    INGEST_MSG.labels(payload.type).inc()
+    stats.on_ingest(payload.type)
+    st = sessions.get(payload.session_id)
+    if not st:
+        st = SessionState()
+        sessions[payload.session_id] = st
+    now_ms = int(time.time() * 1000)
+    window_ms = 1000
+    st.recent_ms = [t for t in st.recent_ms if now_ms - t <= window_ms]
+    if len(st.recent_ms) >= max(1, settings.max_ingest_rps):
+        RATE_LIMITED.inc()
+        return {"ok": False, "rate_limited": True, "session_id": payload.session_id}
+    st.recent_ms.append(now_ms)
+    if payload.start_ms is not None:
+        st.start_ms = int(payload.start_ms)
+    if payload.gap_ms is not None:
+        st.gap_ms = int(payload.gap_ms)
+
+    st.text = payload.text
+    tokens = tokenize_ko(st.text)
+    glosses = ko_to_gloss(tokens)
+    new_timeline = compile_glosses(glosses, start_ms=st.start_ms, gap_ms=st.gap_ms, include_aux_channels=settings.include_aux_channels)
+    if st.base_id is None:
+        st.base_id = new_timeline["id"]
+    st.last_update_ms = now_ms
+
+    old_clips = [e["clip"] for e in st.events]
+    new_clips = [e["clip"] for e in new_timeline["events"]]
+    start_idx, end_idx = _diff_window(old_clips, new_clips)
+    if start_idx < len(new_timeline["events"]):
+        from_t = new_timeline["events"][start_idx]["t_ms"]
+    else:
+        from_t = new_timeline["events"][-1]["t_ms"] if new_timeline["events"] else 0
+
+    if not st.events:
+        out = {"type": "timeline", "session_id": payload.session_id, "data": new_timeline}
+        await manager.broadcast_json(out)
+        stats.on_timeline()
+        _log_timeline("timeline", out)
+        if payload.origin_ts:
+            lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+            INGEST_TO_BC_MS.observe(lat)
+            stats.on_latency(lat)
+        TIMELINE_BC.inc()
+    else:
+        out = {"type": "timeline.replace", "session_id": payload.session_id, "from_t_ms": from_t, "data": {"id": st.base_id, "events": new_timeline["events"][start_idx:end_idx]}}
+        await manager.broadcast_json(out)
+        stats.on_timeline()
+        _log_timeline("timeline.replace", out)
+        if payload.origin_ts:
+            lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+            INGEST_TO_BC_MS.observe(lat)
+            stats.on_latency(lat)
+        TIMELINE_BC.inc()
+    st.events = new_timeline["events"]
+    return {"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final"}
+
+
 def _first_diff_index(a: List[str], b: List[str]) -> int:
     n = min(len(a), len(b))
     for i in range(n):
@@ -714,3 +773,35 @@ async def lexicon_rollback(req: LexiconRollbackReq, _: None = Depends(require_ap
         return {"ok": True, "name": req.name, "size": len(items)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.websocket("/ws/asr")
+async def ws_asr(ws: WebSocket):
+    key = ws.query_params.get("key")
+    if settings.api_key and key != settings.api_key:
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.receive":
+                if msg.get("text") is not None:
+                    try:
+                        data = json.loads(msg["text"])
+                        payload = StreamIn(**data)
+                        res = await _process_stream_in(payload)
+                        await ws.send_json(res)
+                    except Exception:
+                        await ws.send_json({"ok": False, "error": "invalid message"})
+                else:
+                    # binary frame (PCM) stub ack
+                    b = msg.get("bytes") or b""
+                    await ws.send_json({"ok": True, "bytes": len(b)})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        try:
+            await ws.close()
+        except Exception:
+            pass

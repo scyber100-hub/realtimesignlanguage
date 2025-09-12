@@ -49,6 +49,7 @@ pipeline-server (본 리포지토리 포함)
   - WS /ws/ingest → {type:"partial"|"final", session_id, text, start_ms?, gap_ms?} 증분 인입
     - 서버는 최초 full `timeline`, 이후 차이점부터 `timeline.replace`(from_t_ms 포함) 전송
     - `origin_ts`(ms) 필드를 포함하면 ingest→broadcast 지연 히스토그램에 반영
+  - WS /ws/asr → 텍스트 JSON(StreamIn) 또는 바이너리 PCM 프레임(스텁 ACK)
 
 추가 참고
 - GET /sessions_full → last_update_ms 포함 세션 상세 목록

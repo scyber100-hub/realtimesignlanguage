@@ -127,6 +127,7 @@ Lexicon 업로드 API
 - `scripts/mock_asr_stream.py --text "안녕하세요 오늘 한국" --api-key <API_KEY>`
 - `scripts/vosk_ingest_from_rtmp.py --model <vosk_model_dir> --api-key <API_KEY>`
 - `scripts/whisper_ingest_from_rtmp.py --model base --api-key <API_KEY>`
+- `scripts/wav_ws_stream.py --wav sample_16k_mono.wav --api-key <API_KEY>` → `/ws/asr`로 PCM 바이너리 전송(서버 스텁 ACK)
 
 GitHub 푸시
 - 리포지토리를 초기화하고 푸시하려면(예시):
