@@ -190,6 +190,22 @@ async def events_recent(n: int = 100, _: None = Depends(require_api_key)):
     return {"count": len(items), "items": items}
 
 
+@app.get("/events/summary")
+async def events_summary(n: int = 100, _: None = Depends(require_api_key)):
+    try:
+        n = max(1, min(int(n), RECENT_EVENTS_MAX))
+    except Exception:
+        n = 100
+    if isinstance(RECENT_EVENTS, list):
+        items = RECENT_EVENTS[-n:]
+    else:
+        items = list(RECENT_EVENTS)[-n:]
+    total = len(items)
+    replaces = len([x for x in items if x.get("type") == "timeline.replace"])
+    ratio = (replaces / total) if total else 0
+    return {"total": total, "replaces": replaces, "ratio": round(ratio, 3)}
+
+
 class TextIn(BaseModel):
     text: str
 

@@ -94,6 +94,7 @@
     <input id="evSessFilter" type="text" placeholder="filter by session_id (optional)"/>
     <label><input type="checkbox" id="autoEv"/> auto-refresh</label>
     <input id="evInt" type="number" value="5" min="1" style="width:60px;"/>s
+    <span class="badge" id="evSummary"></span>
   </div>
   <pre id="evOut" style="display:block; max-height:180px;"></pre>
 
@@ -353,6 +354,9 @@
       }
       document.getElementById('evOut').textContent = JSON.stringify(data, null, 2);
       log('GET /events/recent');
+      // fetch summary
+      const sum = await (await fetch(`/events/summary?n=${n}`, { headers })).json();
+      document.getElementById('evSummary').textContent = `summary: total=${sum.total} replace=${sum.replaces} ratio=${sum.ratio}`;
     }
     document.getElementById('evFetch').onclick = loadEvents;
 
