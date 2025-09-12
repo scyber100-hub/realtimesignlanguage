@@ -590,10 +590,7 @@ class LexiconUpdate(BaseModel):
 @app.post("/lexicon/update")
 async def lexicon_update(payload: LexiconUpdate, _: None = Depends(require_api_key)):
     set_overlay_lexicon(payload.items)
-    try:
-        LEX_AUDIT.write_text(json.dumps({"ts": int(time.time()*1000), "action": "update", "size": len(payload.items)}, ensure_ascii=False) + "\n", encoding="utf-8", append=True)  # type: ignore
-    except Exception:
-        pass
+    _audit_lexicon({"action": "update", "size": len(payload.items)})
     return {"ok": True, "size": len(payload.items)}
 
 
@@ -754,10 +751,7 @@ async def lexicon_upload(file: UploadFile = File(...), _: None = Depends(require
         if not isinstance(obj, dict):
             raise ValueError("uploaded JSON must be an object {ko: GLOSS}")
         set_overlay_lexicon(obj)
-        try:
-            LEX_AUDIT.write_text(json.dumps({"ts": int(time.time()*1000), "action": "upload", "size": len(obj)}, ensure_ascii=False) + "\n", encoding="utf-8", append=True)  # type: ignore
-        except Exception:
-            pass
+        _audit_lexicon({"action": "upload", "size": len(obj)})
         return {"ok": True, "size": len(obj)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -775,10 +769,7 @@ async def lexicon_snapshot(req: LexiconSnapshotReq, _: None = Depends(require_ap
     path = VERS_DIR / name
     data = {"_meta": {"ts": ts, "note": req.note or ""}, "items": _OVERLAY}
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        LEX_AUDIT.write_text(json.dumps({"ts": ts, "action": "snapshot", "name": name, "note": req.note or ""}, ensure_ascii=False) + "\n", encoding="utf-8", append=True)  # type: ignore
-    except Exception:
-        pass
+    _audit_lexicon({"action": "snapshot", "name": name, "note": req.note or ""}, ts)
     return {"ok": True, "name": name}
 
 
@@ -812,11 +803,40 @@ async def lexicon_rollback(req: LexiconRollbackReq, _: None = Depends(require_ap
         if not isinstance(items, dict):
             raise ValueError("invalid snapshot format")
         set_overlay_lexicon(items)
-        try:
-            LEX_AUDIT.write_text(json.dumps({"ts": int(time.time()*1000), "action": "rollback", "name": req.name, "size": len(items)}, ensure_ascii=False) + "\n", encoding="utf-8", append=True)  # type: ignore
-        except Exception:
-            pass
+        _audit_lexicon({"action": "rollback", "name": req.name, "size": len(items)})
         return {"ok": True, "name": req.name, "size": len(items)}
+
+
+def _audit_lexicon(data: Dict[str, Any], ts: Optional[int] = None) -> None:
+    try:
+        rec = {"ts": ts or int(time.time()*1000)}
+        rec.update(data)
+        with LEX_AUDIT.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+@app.get("/lexicon/audit")
+async def lexicon_audit(n: int = 100, _: None = Depends(require_api_key)):
+    try:
+        n = max(1, min(int(n), 1000))
+    except Exception:
+        n = 100
+    if not LEX_AUDIT.exists():
+        return {"count": 0, "items": []}
+    try:
+        lines = LEX_AUDIT.read_text(encoding="utf-8").splitlines()
+        tail = lines[-n:]
+        items = []
+        for ln in tail:
+            try:
+                items.append(json.loads(ln))
+            except Exception:
+                continue
+        return {"count": len(items), "items": items}
+    except Exception:
+        return {"count": 0, "items": []}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
