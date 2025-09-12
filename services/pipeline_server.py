@@ -169,6 +169,16 @@ def _log_timeline(evt_type: str, payload: Dict[str, Any]):
         logger.debug(f"timeline log error: {e}")
 
 
+async def _stats_broadcaster():
+    # broadcast stats periodically to all timeline subscribers
+    while True:
+        try:
+            await manager.broadcast_json({"type": "stats", "data": stats.snapshot()})
+        except Exception:
+            pass
+        await asyncio.sleep(2.0)
+
+
 @app.post("/ingest_text")
 async def ingest_text(payload: IngestText, _: None = Depends(require_api_key)):
     start = time.perf_counter()
@@ -179,6 +189,7 @@ async def ingest_text(payload: IngestText, _: None = Depends(require_api_key)):
         timeline["id"] = payload.id
     payload = {"type": "timeline", "data": timeline}
     await manager.broadcast_json(payload)
+    stats.on_timeline()
     _log_timeline("timeline", payload)
     TIMELINE_BC.inc()
     REQ_LAT.labels("ingest_text").observe(time.perf_counter() - start)
@@ -249,6 +260,7 @@ async def ws_ingest(ws: WebSocket):
             msg = await ws.receive_json()
             payload = StreamIn(**msg)
             INGEST_MSG.labels(payload.type).inc()
+            stats.on_ingest(payload.type)
             st = sessions.get(payload.session_id)
             if not st:
                 st = SessionState()
@@ -284,6 +296,7 @@ async def ws_ingest(ws: WebSocket):
                     "data": new_timeline,
                 }
                 await manager.broadcast_json(out)
+                stats.on_timeline()
                 _log_timeline("timeline", out)
                 TIMELINE_BC.inc()
             else:
@@ -297,6 +310,7 @@ async def ws_ingest(ws: WebSocket):
                     },
                 }
                 await manager.broadcast_json(out)
+                stats.on_timeline()
                 _log_timeline("timeline.replace", out)
                 TIMELINE_BC.inc()
 
@@ -311,6 +325,12 @@ async def ws_ingest(ws: WebSocket):
             await ws.close()
         except Exception:
             pass
+
+
+@app.on_event("startup")
+async def _on_startup():
+    # start stats broadcaster
+    asyncio.create_task(_stats_broadcaster())
 class LexiconUpdate(BaseModel):
     items: Dict[str, str]
 
@@ -335,6 +355,45 @@ async def log_requests(request, call_next):
         response = await call_next(request)
         return response
     finally:
+# Lightweight runtime stats (for dashboard)
+class Stats:
+    def __init__(self):
+        from collections import deque
+        self.timeline_total = 0
+        self.ingest_partial = 0
+        self.ingest_final = 0
+        self._timeline_ts = deque(maxlen=5000)
+        self._ingest_ts = deque(maxlen=5000)
+
+    def on_timeline(self):
+        from time import time as now
+        self.timeline_total += 1
+        self._timeline_ts.append(int(now() * 1000))
+
+    def on_ingest(self, mtype: str):
+        from time import time as now
+        if mtype == "partial":
+            self.ingest_partial += 1
+        elif mtype == "final":
+            self.ingest_final += 1
+        self._ingest_ts.append(int(now() * 1000))
+
+    def snapshot(self) -> Dict[str, Any]:
+        import time as _t
+        now = int(_t.time() * 1000)
+        window_ms = 60_000
+        timeline_rate = len([t for t in self._timeline_ts if now - t <= window_ms]) / 60.0
+        ingest_rate = len([t for t in self._ingest_ts if now - t <= window_ms]) / 60.0
+        return {
+            "timeline_broadcast_total": self.timeline_total,
+            "timeline_rate_per_sec_1m": round(timeline_rate, 3),
+            "ingest_partial_total": self.ingest_partial,
+            "ingest_final_total": self.ingest_final,
+            "ingest_rate_per_sec_1m": round(ingest_rate, 3),
+        }
+
+
+stats = Stats()
         dur = (time.perf_counter() - start) * 1000.0
         logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
 
