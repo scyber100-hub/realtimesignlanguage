@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any, Tuple
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -436,3 +436,16 @@ try:
 except Exception:
     # directory may not exist in some envs; ignore mount errors
     pass
+
+
+@app.post("/lexicon/upload")
+async def lexicon_upload(file: UploadFile = File(...), _: None = Depends(require_api_key)):
+    try:
+        data = await file.read()
+        obj = json.loads(data)
+        if not isinstance(obj, dict):
+            raise ValueError("uploaded JSON must be an object {ko: GLOSS}")
+        set_overlay_lexicon(obj)
+        return {"ok": True, "size": len(obj)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

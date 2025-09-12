@@ -97,6 +97,13 @@ Docker 실행
 Self-check
 - 빠른 점검: `python scripts/self_check.py`
 
+추가: Whisper GPU 실행 예시
+- CPU: `python scripts/whisper_ingest_from_rtmp.py --model base --device cpu --compute int8 --rtmp rtmp://origin/live/stream`
+- GPU: `python scripts/whisper_ingest_from_rtmp.py --model medium --device cuda --compute float16 --rtmp rtmp://origin/live/stream`
+
+Lexicon 업로드 API
+- `POST /lexicon/upload` (multipart/form-data)로 JSON 파일 업로드 시 런타임 사전 즉시 반영
+
 웹 대시보드
 - 서버 기동 후 브라우저에서 `http://localhost:8000/` 접속
 - 실시간 WebSocket 타임라인을 콘솔로 확인하고 `POST /ingest_text` 테스트 가능
