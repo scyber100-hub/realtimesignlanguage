@@ -380,6 +380,7 @@ async def _process_stream_in(payload: StreamIn):
             INGEST_TO_BC_MS.observe(lat)
             stats.on_latency(lat)
         TIMELINE_BC.inc()
+        stats.on_replace()
     st.events = new_timeline["events"]
     return {"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final"}
 
@@ -517,14 +518,15 @@ async def ws_ingest(ws: WebSocket):
                         "events": new_timeline["events"][start_idx:end_idx],
                     },
                 }
-                await manager.broadcast_json(out)
-                stats.on_timeline()
-                _log_timeline("timeline.replace", out)
-                if payload.origin_ts:
-                    lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
-                    INGEST_TO_BC_MS.observe(lat)
-                    stats.on_latency(lat)
-                TIMELINE_BC.inc()
+        await manager.broadcast_json(out)
+        stats.on_timeline()
+        _log_timeline("timeline.replace", out)
+        if payload.origin_ts:
+            lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+            INGEST_TO_BC_MS.observe(lat)
+            stats.on_latency(lat)
+        TIMELINE_BC.inc()
+        stats.on_replace()
 
             st.events = new_timeline["events"]
 
@@ -613,6 +615,7 @@ class Stats:
     def __init__(self):
         from collections import deque
         self.timeline_total = 0
+        self.replace_total = 0
         self.ingest_partial = 0
         self.ingest_final = 0
         self._timeline_ts = deque(maxlen=5000)
@@ -632,6 +635,9 @@ class Stats:
         elif mtype == "final":
             self.ingest_final += 1
         self._ingest_ts.append(int(now() * 1000))
+
+    def on_replace(self):
+        self.replace_total += 1
 
     def on_latency(self, ms: int):
         try:
@@ -676,6 +682,8 @@ class Stats:
         return {
             "timeline_broadcast_total": self.timeline_total,
             "timeline_rate_per_sec_1m": round(timeline_rate, 3),
+            "timeline_replace_total": self.replace_total,
+            "timeline_replace_ratio": (round(self.replace_total / self.timeline_total, 3) if self.timeline_total else 0),
             "ingest_partial_total": self.ingest_partial,
             "ingest_final_total": self.ingest_final,
             "ingest_rate_per_sec_1m": round(ingest_rate, 3),
@@ -850,9 +858,21 @@ async def ws_asr(ws: WebSocket):
     await ws.accept()
     try:
         session_id = None
-        streamer = _WhisperStreamer()
+        # parse optional params
+        model = ws.query_params.get("model") or "base"
+        device = ws.query_params.get("device") or "cpu"
+        compute = ws.query_params.get("compute") or "int8"
+        try:
+            beam_size = int(ws.query_params.get("beam_size") or 1)
+        except Exception:
+            beam_size = 1
+        try:
+            chunk_ms = int(ws.query_params.get("chunk_ms") or 400)
+        except Exception:
+            chunk_ms = 400
+        streamer = _WhisperStreamer(model_name=model, device=device, compute=compute, beam_size=beam_size)
         ring = bytearray()
-        chunk_bytes = int(16000 * 2 * 0.4)  # ~400ms
+        chunk_bytes = int(16000 * 2 * (chunk_ms/1000.0))
         while True:
             msg = await ws.receive()
             if msg.get("type") != "websocket.receive":

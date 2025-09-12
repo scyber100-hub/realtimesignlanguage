@@ -35,6 +35,8 @@
   <div class="row" style="gap:24px;">
     <div>timeline total: <b id="tl_total">0</b></div>
     <div>timeline rate(1m): <b id="tl_rate">0</b>/s</div>
+    <div>replace total: <b id="rep_total">0</b></div>
+    <div>replace ratio: <b id="rep_ratio">0</b></div>
     <div>ingest partial: <b id="ing_p">0</b></div>
     <div>ingest final: <b id="ing_f">0</b></div>
     <div>ingest rate(1m): <b id="ing_rate">0</b>/s</div>
@@ -180,6 +182,8 @@
             const s = data.data || {};
             document.getElementById('tl_total').textContent = s.timeline_broadcast_total ?? 0;
             document.getElementById('tl_rate').textContent = s.timeline_rate_per_sec_1m ?? 0;
+            document.getElementById('rep_total').textContent = s.timeline_replace_total ?? 0;
+            document.getElementById('rep_ratio').textContent = s.timeline_replace_ratio ?? 0;
             document.getElementById('ing_p').textContent = s.ingest_partial_total ?? 0;
             document.getElementById('ing_f').textContent = s.ingest_final_total ?? 0;
             document.getElementById('ing_rate').textContent = s.ingest_rate_per_sec_1m ?? 0;

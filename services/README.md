@@ -50,6 +50,7 @@ pipeline-server (본 리포지토리 포함)
     - 서버는 최초 full `timeline`, 이후 차이점부터 `timeline.replace`(from_t_ms 포함) 전송
     - `origin_ts`(ms) 필드를 포함하면 ingest→broadcast 지연 히스토그램에 반영
   - WS /ws/asr → 텍스트 JSON(StreamIn) 또는 바이너리 PCM 프레임(스텁 ACK)
+    - 쿼리 파라미터(선택): `model`(기본 base), `device`(cpu|cuda), `compute`(int8|int8_float16|float16|float32), `beam_size`(정수), `chunk_ms`(기본 400)
 
 추가 참고
 - GET /sessions_full → last_update_ms 포함 세션 상세 목록
