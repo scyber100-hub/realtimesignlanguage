@@ -142,7 +142,7 @@ class GlossIn(BaseModel):
 async def gloss2timeline(payload: GlossIn):
     start = time.perf_counter()
     glosses = list(zip(payload.gloss, payload.conf or [0.9] * len(payload.gloss)))
-    timeline = compile_glosses(glosses, start_ms=payload.start_ms, gap_ms=payload.gap_ms)
+    timeline = compile_glosses(glosses, start_ms=payload.start_ms, gap_ms=payload.gap_ms, include_aux_channels=settings.include_aux_channels)
     REQ_LAT.labels("gloss2timeline").observe(time.perf_counter() - start)
     if _TIMELINE_SCHEMA is not None:
         jsonschema_validate(timeline, _TIMELINE_SCHEMA)
@@ -189,7 +189,7 @@ async def ingest_text(payload: IngestText, _: None = Depends(require_api_key)):
     start = time.perf_counter()
     tokens = tokenize_ko(payload.text)
     glosses = ko_to_gloss(tokens)
-    timeline = compile_glosses(glosses, start_ms=payload.start_ms, gap_ms=payload.gap_ms)
+    timeline = compile_glosses(glosses, start_ms=payload.start_ms, gap_ms=payload.gap_ms, include_aux_channels=settings.include_aux_channels)
     if payload.id:
         timeline["id"] = payload.id
     payload = {"type": "timeline", "data": timeline}
@@ -280,7 +280,7 @@ async def ws_ingest(ws: WebSocket):
             st.text = payload.text
             tokens = tokenize_ko(st.text)
             glosses = ko_to_gloss(tokens)
-            new_timeline = compile_glosses(glosses, start_ms=st.start_ms, gap_ms=st.gap_ms)
+            new_timeline = compile_glosses(glosses, start_ms=st.start_ms, gap_ms=st.gap_ms, include_aux_channels=settings.include_aux_channels)
             if st.base_id is None:
                 st.base_id = new_timeline["id"]
 

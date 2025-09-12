@@ -33,6 +33,7 @@
     <button id="wsdisconnect">Disconnect WS</button>
   </div>
   <pre id="log"></pre>
+  <canvas id="timeline" width="900" height="120" style="border:1px solid #333; margin-top:10px;"></canvas>
 
   <script>
     const logEl = document.getElementById('log');
@@ -51,6 +52,25 @@
       ws.onopen = () => { statusEl.textContent = 'connected'; statusEl.style.background = '#c2f0c2'; log('WS connected'); ws.send('hello'); };
       ws.onclose = () => { statusEl.textContent = 'disconnected'; statusEl.style.background = '#f0c2c2'; log('WS disconnected'); };
       ws.onerror = (e) => { log('WS error'); };
+      const tl = document.getElementById('timeline');
+      const ctx = tl.getContext('2d');
+      let zero = null;
+      function drawTimeline(events){
+        if(!events) return;
+        ctx.clearRect(0,0,tl.width, tl.height);
+        if(zero === null){ zero = Date.now(); }
+        const scale = 0.2; // ms to px
+        for(const e of events){
+          const x = 10 + e.t_ms * scale;
+          const w = e.dur_ms * scale;
+          const y = e.channel === 'face' ? 10 : (e.channel === 'gaze' ? 50 : 90);
+          ctx.fillStyle = e.channel === 'face' ? '#ff7f7f' : (e.channel === 'gaze' ? '#7fbfff' : '#90ee90');
+          ctx.fillRect(x, y, Math.max(2,w), 12);
+        }
+        ctx.fillStyle = '#aaa';
+        ctx.fillText('face', 5, 20); ctx.fillText('gaze', 5, 60); ctx.fillText('default', 5, 100);
+      }
+
       ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
@@ -62,6 +82,13 @@
             document.getElementById('ing_f').textContent = s.ingest_final_total ?? 0;
             document.getElementById('ing_rate').textContent = s.ingest_rate_per_sec_1m ?? 0;
             document.getElementById('last_lat').textContent = s.last_ingest_to_bc_ms ?? '-';
+          } else if (data.type === 'timeline' && data.data) {
+            drawTimeline(data.data.events);
+            log(JSON.stringify(data));
+          } else if (data.type === 'timeline.replace' && data.data) {
+            // naive redraw from replacement: just redraw replacement slice for demo
+            drawTimeline(data.data.events);
+            log(JSON.stringify(data));
           } else {
             log(JSON.stringify(data));
           }

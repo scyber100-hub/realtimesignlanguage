@@ -12,6 +12,7 @@ class Settings:
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     enable_metrics: bool = os.getenv("ENABLE_METRICS", "1") == "1"
     lexicon_path: str | None = os.getenv("LEXICON_PATH")
+    include_aux_channels: bool = os.getenv("INCLUDE_AUX_CHANNELS", "1") == "1"
 
 
 @lru_cache
