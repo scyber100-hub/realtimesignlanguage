@@ -77,6 +77,8 @@
     <button id="sessList">GET /sessions</button>
     <input id="sessId" type="text" placeholder="session_id(optional for reset)"/>
     <button id="sessReset">POST /sessions/reset</button>
+    <label><input type="checkbox" id="autoSess"/> auto-refresh</label>
+    <input id="sessInt" type="number" value="5" min="1" style="width:60px;"/>s
   </div>
   <table id="sessTable" border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px; min-width:600px;">
     <thead><tr><th>session</th><th>events</th><th>text_len</th><th>last_update_ms</th></tr></thead>
@@ -87,6 +89,9 @@
   <div class="row">
     <button id="evFetch">GET /events/recent</button>
     <input id="evN" type="number" value="50" min="1" max="300" style="width:80px;"/>
+    <input id="evSessFilter" type="text" placeholder="filter by session_id (optional)"/>
+    <label><input type="checkbox" id="autoEv"/> auto-refresh</label>
+    <input id="evInt" type="number" value="5" min="1" style="width:60px;"/>s
   </div>
   <pre id="evOut" style="display:block; max-height:180px;"></pre>
 
@@ -310,7 +315,7 @@
     };
 
     // Sessions handlers
-    document.getElementById('sessList').onclick = async () => {
+    async function loadSessions(){
       const res = await fetch('/sessions_full');
       const data = await res.json();
       const tb = document.querySelector('#sessTable tbody');
@@ -321,6 +326,8 @@
         tb.appendChild(tr);
       });
       log('GET /sessions_full => ' + JSON.stringify(data));
+    }
+    document.getElementById('sessList').onclick = loadSessions;
     };
     document.getElementById('sessReset').onclick = async () => {
       const sid = document.getElementById('sessId').value;
@@ -329,14 +336,35 @@
       log('POST /sessions/reset => ' + JSON.stringify(data));
     };
 
-    document.getElementById('evFetch').onclick = async () => {
+    async function loadEvents(){
       const headers = {};
       const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
       const n = parseInt(document.getElementById('evN').value || '50');
       const res = await fetch(`/events/recent?n=${n}`, { headers });
       const data = await res.json();
+      const filter = (document.getElementById('evSessFilter').value||'').trim();
+      if (filter) {
+        data.items = (data.items||[]).filter(x => x.session_id === filter);
+        data.count = data.items.length;
+      }
       document.getElementById('evOut').textContent = JSON.stringify(data, null, 2);
       log('GET /events/recent');
+    }
+    document.getElementById('evFetch').onclick = loadEvents;
+
+    // auto refresh toggles
+    let sessTimer = null, evTimer = null;
+    document.getElementById('autoSess').onchange = (e) => {
+      if (e.target.checked) {
+        const s = Math.max(1, parseInt(document.getElementById('sessInt').value||'5'));
+        sessTimer = setInterval(loadSessions, s*1000);
+      } else { if (sessTimer) { clearInterval(sessTimer); sessTimer = null; } }
+    };
+    document.getElementById('autoEv').onchange = (e) => {
+      if (e.target.checked) {
+        const s = Math.max(1, parseInt(document.getElementById('evInt').value||'5'));
+        evTimer = setInterval(loadEvents, s*1000);
+      } else { if (evTimer) { clearInterval(evTimer); evTimer = null; } }
     };
   </script>
 </body>

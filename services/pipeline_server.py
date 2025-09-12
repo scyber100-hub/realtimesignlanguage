@@ -17,6 +17,7 @@ from packages.ksl_rules import tokenize_ko, ko_to_gloss, set_overlay_lexicon, lo
 from packages.sign_timeline import compile_glosses
 from services.config import get_settings
 import logging
+from typing import Callable
 
 
 class IngestText(BaseModel):
@@ -230,6 +231,7 @@ TIMELINE_LOG = LOG_DIR / "timeline.log"
 VERS_DIR = Path("lexicon/versions")
 VERS_DIR.mkdir(parents=True, exist_ok=True)
 LAST_TIMELINE_PATH = LOG_DIR / "last_timeline.json"
+LEX_AUDIT = LOG_DIR / "lexicon_audit.log"
 RECENT_EVENTS_MAX = 300
 try:
     from collections import deque as _deque
@@ -380,6 +382,34 @@ async def _process_stream_in(payload: StreamIn):
         TIMELINE_BC.inc()
     st.events = new_timeline["events"]
     return {"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final"}
+
+
+# Optional Whisper streaming transcriber (very simple, best-effort)
+class _WhisperStreamer:
+    def __init__(self, model_name: str = "base", device: str = "cpu", compute: str = "int8", beam_size: int = 1):
+        try:
+            from faster_whisper import WhisperModel  # type: ignore
+            self.model = WhisperModel(model_name, device=device, compute_type=compute)
+            self.beam_size = beam_size
+        except Exception:
+            self.model = None
+
+    def transcribe_pcm16le(self, pcm_bytes: bytes, sample_rate: int = 16000) -> str:
+        if not self.model or not pcm_bytes:
+            return ""
+        try:
+            import numpy as np  # type: ignore
+            pcm = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            segments, _ = self.model.transcribe(
+                pcm,
+                language="ko",
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 200},
+                beam_size=self.beam_size or 1,
+            )
+            return " ".join([s.text.strip() for s in segments]).strip()
+        except Exception:
+            return ""
 
 
 def _first_diff_index(a: List[str], b: List[str]) -> int:
@@ -560,6 +590,10 @@ class LexiconUpdate(BaseModel):
 @app.post("/lexicon/update")
 async def lexicon_update(payload: LexiconUpdate, _: None = Depends(require_api_key)):
     set_overlay_lexicon(payload.items)
+    try:
+        LEX_AUDIT.write_text(json.dumps({"ts": int(time.time()*1000), "action": "update", "size": len(payload.items)}, ensure_ascii=False) + "\n", encoding="utf-8", append=True)  # type: ignore
+    except Exception:
+        pass
     return {"ok": True, "size": len(payload.items)}
 
 
@@ -720,6 +754,10 @@ async def lexicon_upload(file: UploadFile = File(...), _: None = Depends(require
         if not isinstance(obj, dict):
             raise ValueError("uploaded JSON must be an object {ko: GLOSS}")
         set_overlay_lexicon(obj)
+        try:
+            LEX_AUDIT.write_text(json.dumps({"ts": int(time.time()*1000), "action": "upload", "size": len(obj)}, ensure_ascii=False) + "\n", encoding="utf-8", append=True)  # type: ignore
+        except Exception:
+            pass
         return {"ok": True, "size": len(obj)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -737,6 +775,10 @@ async def lexicon_snapshot(req: LexiconSnapshotReq, _: None = Depends(require_ap
     path = VERS_DIR / name
     data = {"_meta": {"ts": ts, "note": req.note or ""}, "items": _OVERLAY}
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        LEX_AUDIT.write_text(json.dumps({"ts": ts, "action": "snapshot", "name": name, "note": req.note or ""}, ensure_ascii=False) + "\n", encoding="utf-8", append=True)  # type: ignore
+    except Exception:
+        pass
     return {"ok": True, "name": name}
 
 
@@ -770,6 +812,10 @@ async def lexicon_rollback(req: LexiconRollbackReq, _: None = Depends(require_ap
         if not isinstance(items, dict):
             raise ValueError("invalid snapshot format")
         set_overlay_lexicon(items)
+        try:
+            LEX_AUDIT.write_text(json.dumps({"ts": int(time.time()*1000), "action": "rollback", "name": req.name, "size": len(items)}, ensure_ascii=False) + "\n", encoding="utf-8", append=True)  # type: ignore
+        except Exception:
+            pass
         return {"ok": True, "name": req.name, "size": len(items)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -783,21 +829,39 @@ async def ws_asr(ws: WebSocket):
         return
     await ws.accept()
     try:
+        session_id = None
+        streamer = _WhisperStreamer()
+        ring = bytearray()
+        chunk_bytes = int(16000 * 2 * 0.4)  # ~400ms
         while True:
             msg = await ws.receive()
-            if msg.get("type") == "websocket.receive":
-                if msg.get("text") is not None:
-                    try:
-                        data = json.loads(msg["text"])
-                        payload = StreamIn(**data)
-                        res = await _process_stream_in(payload)
+            if msg.get("type") != "websocket.receive":
+                continue
+            if msg.get("text") is not None:
+                # Init or direct text bridge
+                try:
+                    data = json.loads(msg["text"])
+                    payload = StreamIn(**data)
+                    if not session_id:
+                        session_id = payload.session_id
+                    res = await _process_stream_in(payload)
+                    await ws.send_json(res)
+                except Exception:
+                    await ws.send_json({"ok": False, "error": "invalid message"})
+            else:
+                b = msg.get("bytes") or b""
+                if not b:
+                    await ws.send_json({"ok": True, "bytes": 0})
+                    continue
+                ring.extend(b)
+                await ws.send_json({"ok": True, "bytes": len(b)})
+                if len(ring) >= chunk_bytes and session_id:
+                    # best-effort local transcription
+                    text = streamer.transcribe_pcm16le(bytes(ring))
+                    if text:
+                        res = await _process_stream_in(StreamIn(type="partial", session_id=session_id, text=text))
                         await ws.send_json(res)
-                    except Exception:
-                        await ws.send_json({"ok": False, "error": "invalid message"})
-                else:
-                    # binary frame (PCM) stub ack
-                    b = msg.get("bytes") or b""
-                    await ws.send_json({"ok": True, "bytes": len(b)})
+                        ring.clear()
     except WebSocketDisconnect:
         pass
     except Exception:
