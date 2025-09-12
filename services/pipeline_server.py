@@ -463,6 +463,7 @@ class Stats:
         lats = list(self._lat_ms)
         p50 = p90 = p99 = None
         hist = None
+        recent = []
         if lats:
             sl = sorted(lats)
             def pct(p):
@@ -483,6 +484,8 @@ class Stats:
                     idx += 1
                 counts[idx] += 1
             hist = {"buckets": buckets, "counts": counts}
+            # tail (last 30)
+            recent = lats[-30:]
         return {
             "timeline_broadcast_total": self.timeline_total,
             "timeline_rate_per_sec_1m": round(timeline_rate, 3),
@@ -490,7 +493,7 @@ class Stats:
             "ingest_final_total": self.ingest_final,
             "ingest_rate_per_sec_1m": round(ingest_rate, 3),
             "last_ingest_to_bc_ms": self.last_ingest_to_bc_ms,
-            "latency_ms": {"p50": p50, "p90": p90, "p99": p99, "hist": hist},
+            "latency_ms": {"p50": p50, "p90": p90, "p99": p99, "hist": hist, "recent": recent},
         }
 
 

@@ -37,6 +37,7 @@
     <div>p99: <b id="p99">-</b> ms</div>
   </div>
   <canvas id="hist" width="900" height="120" style="border:1px solid #333; margin-top:6px;"></canvas>
+  <canvas id="spark" width="900" height="60" style="border:1px solid #333; margin-top:6px;"></canvas>
   <div class="row">
     <button id="wsconnect">Connect WS</button>
     <button id="wsdisconnect">Disconnect WS</button>
@@ -88,6 +89,8 @@
       const ctx = tl.getContext('2d');
       const hist = document.getElementById('hist');
       const hctx = hist.getContext('2d');
+      const spark = document.getElementById('spark');
+      const sctx = spark.getContext('2d');
       let zero = null;
       function drawTimeline(events){
         if(!events) return;
@@ -124,6 +127,25 @@
         hctx.fillText('latency histogram (ms buckets)', 10, 12);
       }
 
+      function drawSpark(recent){
+        if(!recent || recent.length === 0) return;
+        sctx.clearRect(0,0,spark.width,spark.height);
+        const maxV = Math.max(200, ...recent);
+        const minV = 0;
+        const w = spark.width;
+        const h = spark.height;
+        sctx.strokeStyle = '#ffaa00';
+        sctx.beginPath();
+        for(let i=0;i<recent.length;i++){
+          const x = Math.round((i/(recent.length-1))*(w-10))+5;
+          const y = h - 5 - Math.round(((recent[i]-minV)/(maxV-minV))*(h-10));
+          if(i===0) sctx.moveTo(x,y); else sctx.lineTo(x,y);
+        }
+        sctx.stroke();
+        sctx.fillStyle = '#aaa';
+        sctx.fillText('recent latency sparkline', 10, 12);
+      }
+
       ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
@@ -140,6 +162,7 @@
               document.getElementById('p90').textContent = s.latency_ms.p90 ?? '-';
               document.getElementById('p99').textContent = s.latency_ms.p99 ?? '-';
               drawHist(s.latency_ms);
+              drawSpark(s.latency_ms.recent);
             }
           } else if (data.type === 'timeline' && data.data) {
             drawTimeline(data.data.events);

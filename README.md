@@ -106,6 +106,10 @@ Self-check
 Lexicon 업로드 API
 - `POST /lexicon/upload` (multipart/form-data)로 JSON 파일 업로드 시 런타임 사전 즉시 반영
 
+벤치마크(기본)
+- WS 인입 지연 벤치: `python scripts/bench_ingest_latency.py --count 60 --interval_ms 120 --api-key <API_KEY>`
+- 완료 후 `GET /stats`에서 p50/p90/p99, 히스토그램, 최근 스파크라인 확인
+
 웹 대시보드
 - 서버 기동 후 브라우저에서 `http://localhost:8000/` 접속
 - 실시간 WebSocket 타임라인을 콘솔로 확인하고 `POST /ingest_text` 테스트 가능

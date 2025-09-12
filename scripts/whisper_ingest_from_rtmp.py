@@ -50,7 +50,13 @@ async def run(args):
                 # Convert to float32 numpy array in [-1,1]
                 pcm = np.frombuffer(ring[:chunk_bytes], dtype=np.int16).astype(np.float32) / 32768.0
                 ring = ring[hop_bytes:]
-                segments, _ = model.transcribe(pcm, language="ko", vad_filter=True, vad_parameters={"min_silence_duration_ms": 200})
+                segments, _ = model.transcribe(
+                    pcm,
+                    language="ko",
+                    vad_filter=True,
+                    vad_parameters={"min_silence_duration_ms": 200},
+                    beam_size=getattr(args, 'beam_size', None) or 1,
+                )
                 text = " ".join([s.text.strip() for s in segments]).strip()
                 if text:
                     if text != last_text:
@@ -67,11 +73,12 @@ if __name__ == "__main__":
     ap.add_argument("--pipeline-ws", default="ws://localhost:8000/ws/ingest")
     ap.add_argument("--session", default="ch1")
     ap.add_argument("--model", default="base")
-    ap.add_argument("--device", default="cpu")
-    ap.add_argument("--compute", default="int8")
+    ap.add_argument("--device", default="cpu", help="cpu|cuda")
+    ap.add_argument("--compute", default="int8", help="int8|int8_float16|float16|float32")
     ap.add_argument("--chunk_ms", type=int, default=1600)
     ap.add_argument("--hop_ms", type=int, default=400)
     ap.add_argument("--api-key", default=None)
+    ap.add_argument("--beam_size", type=int, default=1)
     args = ap.parse_args()
     if args.api_key and "?key=" not in args.pipeline_ws:
         sep = '&' if '?' in args.pipeline_ws else '?'
