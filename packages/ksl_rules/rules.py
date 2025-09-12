@@ -2,12 +2,15 @@ from typing import List, Tuple, Dict, Optional
 import json
 from pathlib import Path
 from packages.nlp_norm import normalize_tokens
+from packages.nlp_norm.normalize import parse_sino_korean_number
 
 # 매우 단순한 한국어 토크나이저(공백/기호 기준). 실제 서비스는 형태소 분석기 사용 권장.
 def tokenize_ko(text: str) -> List[str]:
     seps = ",.!?;:()[]{}\"'\n\t"
     for s in seps:
         text = text.replace(s, " ")
+    # 숫자 구분 쉼표 제거: 1,234 → 1234
+    text = " ".join([w.replace(",", "") for w in text.split()])
     toks = [t for t in text.strip().split() if t]
     return toks
 
@@ -92,6 +95,11 @@ def ko_to_gloss(tokens: List[str]) -> List[Tuple[str, float]]:
             elif t.startswith("NUM_"):
                 glosses.append((t, 0.85))
             else:
-                glosses.append((t.upper(), 0.5))
+                # 한자어 수(일이삼사오육칠팔구, 십) 간단 파싱
+                val = parse_sino_korean_number(t)
+                if val is not None:
+                    glosses.append((f"NUM_{val}", 0.85))
+                else:
+                    glosses.append((t.upper(), 0.5))
     # 간단한 불용어/어순 조정은 추후 추가
     return glosses

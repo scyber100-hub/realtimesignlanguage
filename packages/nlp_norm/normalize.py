@@ -40,3 +40,22 @@ def normalize_tokens(tokens: List[str]) -> List[str]:
             out.append(t)
     return out
 
+
+# Optional: basic Sino-Korean numeric parsing helper (단일 토큰)
+_SINO = {"영":0,"공":0,"일":1,"이":2,"삼":3,"사":4,"오":5,"육":6,"칠":7,"팔":8,"구":9}
+
+def parse_sino_korean_number(token: str) -> int | None:
+    # Supports forms like "십", "이십", "십사", "이십오" up to 99
+    if not token:
+        return None
+    if token == "십":
+        return 10
+    if "십" in token:
+        parts = token.split("십")
+        tens = _SINO.get(parts[0], 1) if parts[0] else 1
+        units = _SINO.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0
+        return tens * 10 + units
+    # Single digit
+    if token in _SINO:
+        return _SINO[token]
+    return None

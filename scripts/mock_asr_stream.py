@@ -10,6 +10,7 @@ async def main():
     ap.add_argument("--session", default="ch1")
     ap.add_argument("--text", default="안녕하세요 오늘 한국 날씨 속보 태풍")
     ap.add_argument("--delay_ms", type=int, default=300)
+    ap.add_argument("--api-key", default=None)
     args = ap.parse_args()
 
     parts = []
@@ -18,7 +19,11 @@ async def main():
         acc.append(w)
         parts.append(" ".join(acc))
 
-    async with websockets.connect(args.url, ping_interval=20) as ws:
+    url = args.url
+    if args.api_key and "?key=" not in url:
+        sep = '&' if '?' in url else '?'
+        url = f"{url}{sep}key={args.api_key}"
+    async with websockets.connect(url, ping_interval=20) as ws:
         import time
         for i, p in enumerate(parts):
             msg = {"type": "partial", "session_id": args.session, "text": p, "origin_ts": int(time.time()*1000)}

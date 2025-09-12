@@ -103,6 +103,12 @@ Self-check
 
 환경설정(.env)
 - 예시: `.env.example`를 `.env`로 복사 후 값 설정 → 서버가 자동 로드
+ - `LEXICON_PATH=lexicon/ko_domain_lexicon.json` 지정 시 시작 시 도메인 사전 로드
+
+브리지 스크립트와 API 키
+- `scripts/mock_asr_stream.py --text "안녕하세요 오늘 한국" --api-key <API_KEY>`
+- `scripts/vosk_ingest_from_rtmp.py --model <vosk_model_dir> --api-key <API_KEY>`
+- `scripts/whisper_ingest_from_rtmp.py --model base --api-key <API_KEY>`
 
 GitHub 푸시
 - 리포지토리를 초기화하고 푸시하려면(예시):

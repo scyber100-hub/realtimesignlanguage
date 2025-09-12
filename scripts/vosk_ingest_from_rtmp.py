@@ -76,6 +76,10 @@ if __name__ == "__main__":
     ap.add_argument("--rtmp", default="rtmp://origin/live/stream", help="RTMP input URL")
     ap.add_argument("--model", required=True, help="Path to Vosk model directory (e.g., vosk-model-small-ko-0.22)")
     ap.add_argument("--pipeline-ws", default="ws://localhost:8000/ws/ingest", help="Pipeline ingest WS URL")
+    ap.add_argument("--api-key", default=None, help="Optional API key")
     ap.add_argument("--session", default="ch1", help="Pipeline session id")
     args = ap.parse_args()
+    if args.api_key and "?key=" not in args.pipeline_ws:
+        sep = '&' if '?' in args.pipeline_ws else '?'
+        args.pipeline_ws = f"{args.pipeline_ws}{sep}key={args.api_key}"
     asyncio.run(run(args))

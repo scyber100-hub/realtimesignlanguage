@@ -71,5 +71,9 @@ if __name__ == "__main__":
     ap.add_argument("--compute", default="int8")
     ap.add_argument("--chunk_ms", type=int, default=1600)
     ap.add_argument("--hop_ms", type=int, default=400)
+    ap.add_argument("--api-key", default=None)
     args = ap.parse_args()
+    if args.api_key and "?key=" not in args.pipeline_ws:
+        sep = '&' if '?' in args.pipeline_ws else '?'
+        args.pipeline_ws = f"{args.pipeline_ws}{sep}key={args.api_key}"
     asyncio.run(run(args))
