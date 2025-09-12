@@ -6,7 +6,7 @@ import sys
 from collections import deque
 
 
-async def run(args):
+async def run_once(args):
     try:
         from faster_whisper import WhisperModel
     except Exception:
@@ -65,6 +65,18 @@ async def run(args):
                         msg = {"type": "partial", "session_id": session_id, "text": text, "origin_ts": int(_t.time()*1000)}
                         await ws.send(json.dumps(msg, ensure_ascii=False))
                         _ = await ws.recv()
+
+
+async def run(args):
+    backoff = 1.0
+    while True:
+        try:
+            await run_once(args)
+            backoff = 1.0
+        except Exception as e:
+            print("whisper bridge error:", e)
+            await asyncio.sleep(backoff)
+            backoff = min(30.0, backoff * 2)
 
 
 if __name__ == "__main__":

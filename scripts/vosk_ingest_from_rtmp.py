@@ -15,7 +15,7 @@ import websockets
 import asyncio
 
 
-async def run(args):
+async def run_once(args):
     if Model is None or KaldiRecognizer is None:
         print("ERROR: vosk is not installed. pip install vosk and provide a model path.")
         sys.exit(2)
@@ -69,6 +69,18 @@ async def run(args):
                 proc.kill()
             except Exception:
                 pass
+
+
+async def run(args):
+    backoff = 1.0
+    while True:
+        try:
+            await run_once(args)
+            backoff = 1.0
+        except Exception as e:
+            print("vosk bridge error:", e)
+            await asyncio.sleep(backoff)
+            backoff = min(30.0, backoff * 2)
 
 
 if __name__ == "__main__":

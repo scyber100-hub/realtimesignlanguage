@@ -48,6 +48,10 @@ pipeline-server (본 리포지토리 포함)
   - WS /ws/ingest → {type:"partial"|"final", session_id, text, start_ms?, gap_ms?} 증분 인입
     - 서버는 최초 full `timeline`, 이후 차이점부터 `timeline.replace`(from_t_ms 포함) 전송
     - `origin_ts`(ms) 필드를 포함하면 ingest→broadcast 지연 히스토그램에 반영
+
+추가 참고
+- GET /sessions_full → last_update_ms 포함 세션 상세 목록
+- 환경 변수 SESSION_TTL_S(기본 600초) 설정 시 마지막 업데이트 이후 유휴 세션 자동 정리
 보안/설정
 - API 키(선택): `API_KEY` 설정 시 /ingest_text, /lexicon/update, /ws/ingest 보호
 - CORS_ALLOW_ORIGINS, LOG_LEVEL, ENABLE_METRICS 등은 README 참고

@@ -7,7 +7,7 @@ import asyncio
 import time
 import json
 
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
 from jsonschema import validate as jsonschema_validate, Draft202012Validator
 from pathlib import Path
@@ -35,11 +35,19 @@ class ConnectionManager:
         await websocket.accept()
         async with self.lock:
             self.active.append(websocket)
+            try:
+                WS_CLIENTS.set(len(self.active))
+            except Exception:
+                pass
 
     async def disconnect(self, websocket: WebSocket):
         async with self.lock:
             if websocket in self.active:
                 self.active.remove(websocket)
+                try:
+                    WS_CLIENTS.set(len(self.active))
+                except Exception:
+                    pass
 
     async def broadcast_json(self, message):
         async with self.lock:
@@ -53,6 +61,10 @@ class ConnectionManager:
         try:
             await ws.send_json(message)
         except Exception:
+            try:
+                BROADCAST_ERR.inc()
+            except Exception:
+                pass
             try:
                 await ws.close()
             finally:
@@ -82,6 +94,7 @@ class SessionState(BaseModel):
     start_ms: int = 0
     gap_ms: int = 60
     recent_ms: List[int] = []
+    last_update_ms: int = 0
 
 sessions: Dict[str, SessionState] = {}
 
@@ -90,6 +103,8 @@ REQ_LAT = Histogram("pipeline_request_latency_seconds", "Latency of API processi
 TIMELINE_BC = Counter("timeline_broadcast_total", "Number of timeline messages broadcast")
 INGEST_MSG = Counter("ingest_messages_total", "Number of ingest messages", labelnames=("type",))
 INGEST_TO_BC_MS = Histogram("ingest_to_broadcast_ms", "Latency from ingest message to timeline broadcast in ms")
+BROADCAST_ERR = Counter("timeline_broadcast_errors_total", "Number of websocket broadcast errors")
+WS_CLIENTS = Gauge("websocket_clients", "Number of connected websocket clients")
 
 # Load timeline schema for validation
 _SCHEMA_PATH = Path("schemas/sign_timeline.schema.json")
@@ -343,6 +358,7 @@ async def ws_ingest(ws: WebSocket):
             new_timeline = compile_glosses(glosses, start_ms=st.start_ms, gap_ms=st.gap_ms, include_aux_channels=settings.include_aux_channels)
             if st.base_id is None:
                 st.base_id = new_timeline["id"]
+            st.last_update_ms = int(time.time() * 1000)
 
             old_clips = [e["clip"] for e in st.events]
             new_clips = [e["clip"] for e in new_timeline["events"]]
@@ -556,6 +572,50 @@ try:
 except Exception:
     # directory may not exist in some envs; ignore mount errors
     pass
+
+# Session purger (separate startup hook)
+PURGED_SESS = Counter("sessions_purged_total", "Number of sessions purged due to TTL")
+
+
+async def _session_purger():
+    while True:
+        try:
+            ttl_ms = max(10, int(settings.session_ttl_s)) * 1000
+            now = int(time.time() * 1000)
+            to_del = []
+            for sid, st in list(sessions.items()):
+                last = getattr(st, 'last_update_ms', 0) or 0
+                if last and now - last > ttl_ms:
+                    to_del.append(sid)
+            for sid in to_del:
+                sessions.pop(sid, None)
+                try:
+                    PURGED_SESS.inc()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        await asyncio.sleep(15)
+
+
+@app.on_event("startup")
+async def _start_session_purger():
+    asyncio.create_task(_session_purger())
+
+
+@app.get("/sessions_full")
+async def sessions_full(_: None = Depends(require_api_key)):
+    items = []
+    for sid, st in sessions.items():
+        items.append({
+            "session_id": sid,
+            "text_len": len(st.text or ""),
+            "events": len(st.events or []),
+            "start_ms": st.start_ms,
+            "gap_ms": st.gap_ms,
+            "last_update_ms": getattr(st, 'last_update_ms', 0),
+        })
+    return {"count": len(items), "items": items}
 
 
 @app.post("/lexicon/upload")
