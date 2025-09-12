@@ -26,6 +26,7 @@
     <div>ingest partial: <b id="ing_p">0</b></div>
     <div>ingest final: <b id="ing_f">0</b></div>
     <div>ingest rate(1m): <b id="ing_rate">0</b>/s</div>
+    <div>last ingest→broadcast: <b id="last_lat">-</b> ms</div>
   </div>
   <div class="row">
     <button id="wsconnect">Connect WS</button>
@@ -60,6 +61,7 @@
             document.getElementById('ing_p').textContent = s.ingest_partial_total ?? 0;
             document.getElementById('ing_f').textContent = s.ingest_final_total ?? 0;
             document.getElementById('ing_rate').textContent = s.ingest_rate_per_sec_1m ?? 0;
+            document.getElementById('last_lat').textContent = s.last_ingest_to_bc_ms ?? '-';
           } else {
             log(JSON.stringify(data));
           }

@@ -305,7 +305,9 @@ async def ws_ingest(ws: WebSocket):
                 stats.on_timeline()
                 _log_timeline("timeline", out)
                 if payload.origin_ts:
-                    INGEST_TO_BC_MS.observe(max(0, int(time.time()*1000) - int(payload.origin_ts)))
+                    lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+                    INGEST_TO_BC_MS.observe(lat)
+                    stats.on_latency(lat)
                 TIMELINE_BC.inc()
             else:
                 out = {
@@ -321,7 +323,9 @@ async def ws_ingest(ws: WebSocket):
                 stats.on_timeline()
                 _log_timeline("timeline.replace", out)
                 if payload.origin_ts:
-                    INGEST_TO_BC_MS.observe(max(0, int(time.time()*1000) - int(payload.origin_ts)))
+                    lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+                    INGEST_TO_BC_MS.observe(lat)
+                    stats.on_latency(lat)
                 TIMELINE_BC.inc()
 
             st.events = new_timeline["events"]
@@ -384,6 +388,7 @@ class Stats:
         self.ingest_final = 0
         self._timeline_ts = deque(maxlen=5000)
         self._ingest_ts = deque(maxlen=5000)
+        self.last_ingest_to_bc_ms: int | None = None
 
     def on_timeline(self):
         from time import time as now
@@ -398,6 +403,12 @@ class Stats:
             self.ingest_final += 1
         self._ingest_ts.append(int(now() * 1000))
 
+    def on_latency(self, ms: int):
+        try:
+            self.last_ingest_to_bc_ms = int(ms)
+        except Exception:
+            pass
+
     def snapshot(self) -> Dict[str, Any]:
         import time as _t
         now = int(_t.time() * 1000)
@@ -410,6 +421,7 @@ class Stats:
             "ingest_partial_total": self.ingest_partial,
             "ingest_final_total": self.ingest_final,
             "ingest_rate_per_sec_1m": round(ingest_rate, 3),
+            "last_ingest_to_bc_ms": self.last_ingest_to_bc_ms,
         }
 
 
