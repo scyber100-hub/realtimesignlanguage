@@ -1,4 +1,6 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Optional
+import json
+from pathlib import Path
 
 # 매우 단순한 한국어 토크나이저(공백/기호 기준). 실제 서비스는 형태소 분석기 사용 권장.
 def tokenize_ko(text: str) -> List[str]:
@@ -9,7 +11,7 @@ def tokenize_ko(text: str) -> List[str]:
     return toks
 
 # 최소 글로스 규칙: 고빈도 표제어 중심. 실제 서비스: 도메인 사전 + 규칙 + NMT 하이브리드.
-_LEXICON = {
+_LEXICON: Dict[str, str] = {
     "안녕하세요": "HELLO",
     "안녕": "HELLO",
     "한국": "KOREA",
@@ -56,10 +58,28 @@ _LEXICON = {
     "전국": "NATIONWIDE",
 }
 
+# 런타임 오버레이 사전(도메인 단어 추가/수정 용)
+_OVERLAY: Dict[str, str] = {}
+
+def set_overlay_lexicon(d: Dict[str, str]):
+    global _OVERLAY
+    _OVERLAY = dict(d or {})
+
+
+def load_overlay_lexicon(path: str | Path) -> Optional[Dict[str, str]]:
+    p = Path(path)
+    if not p.exists():
+        return None
+    data = json.loads(p.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("overlay lexicon must be a JSON object of {ko: GLOSS}")
+    set_overlay_lexicon(data)  # set globally
+    return data
+
 def ko_to_gloss(tokens: List[str]) -> List[Tuple[str, float]]:
     glosses: List[Tuple[str, float]] = []
     for t in tokens:
-        g = _LEXICON.get(t)
+        g = _OVERLAY.get(t) or _LEXICON.get(t)
         if g:
             glosses.append((g, 0.9))
         else:

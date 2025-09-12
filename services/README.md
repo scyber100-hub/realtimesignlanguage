@@ -35,6 +35,10 @@ pipeline-server (본 리포지토리 포함)
   - POST /ingest_text { text, start_ms?, gap_ms?, id? } → SignTimeline 생성 및 WS 브로드캐스트
   - POST /text2gloss { text } → { gloss, conf }
   - POST /gloss2timeline { gloss[], conf?[], start_ms?, gap_ms? } → SignTimeline(JSON)
+  - POST /lexicon/update { items: { "한국": "KOREA", ... } } → 런타임 사전 갱신
   - WS /ws/timeline → 타임라인 push 수신
   - WS /ws/ingest → {type:"partial"|"final", session_id, text, start_ms?, gap_ms?} 증분 인입
     - 서버는 최초 full `timeline`, 이후 차이점부터 `timeline.replace`(from_t_ms 포함) 전송
+보안/설정
+- API 키(선택): `API_KEY` 설정 시 /ingest_text, /lexicon/update, /ws/ingest 보호
+- CORS_ALLOW_ORIGINS, LOG_LEVEL, ENABLE_METRICS 등은 README 참고

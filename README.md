@@ -69,6 +69,17 @@ API 요약(서버 포함)
 - `WS /ws/ingest` 증분 인입(`partial`/`final`) → `timeline`/`timeline.replace` 브로드캐스트
 - `WS /ws/timeline` 타임라인 구독
 
+보안/설정(환경 변수)
+- `API_KEY`: 설정 시 `POST /ingest_text`, `POST /lexicon/update`, `WS /ws/ingest?key=...` 에서 키 필요
+- `CORS_ALLOW_ORIGINS`: `*,https://your.host` 형태로 허용 오리진 지정(기본 `*`)
+- `DEFAULT_START_MS`/`DEFAULT_GAP_MS`: 기본 타임라인 시작/간격(ms)
+- `LOG_LEVEL`: INFO/DEBUG 등 로그 레벨
+- `ENABLE_METRICS`: `1`(기본)/`0`
+
+도메인 사전(핫 리로드)
+- `POST /lexicon/update { items: { "한국": "KOREA", ... } }`
+- 런타임 오버레이 사전으로 즉시 반영(프로세스 내 메모리)
+
 Docker 실행
 - 로컬 빌드/실행: `powershell -ExecutionPolicy Bypass -File scripts/run_docker.ps1`
 - 또는: `docker compose up --build`

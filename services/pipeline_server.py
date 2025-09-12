@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
@@ -11,8 +11,10 @@ from fastapi.responses import Response
 from jsonschema import validate as jsonschema_validate, Draft202012Validator
 from pathlib import Path
 
-from packages.ksl_rules import tokenize_ko, ko_to_gloss
+from packages.ksl_rules import tokenize_ko, ko_to_gloss, set_overlay_lexicon
 from packages.sign_timeline import compile_glosses
+from services.config import get_settings
+import logging
 
 
 class IngestText(BaseModel):
@@ -55,10 +57,14 @@ class ConnectionManager:
                 await self.disconnect(ws)
 
 
-app = FastAPI(title="Realtime KOR→KSL Pipeline", version="0.1.0")
+settings = get_settings()
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO), format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger("pipeline")
+
+app = FastAPI(title=settings.app_name, version=settings.version)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()] or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,10 +100,12 @@ if _SCHEMA_PATH.exists():
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "ts": int(time.time() * 1000)}
+    return {"ok": True, "ts": int(time.time() * 1000), "version": settings.version}
 
 @app.get("/metrics")
 async def metrics():
+    if not settings.enable_metrics:
+        raise HTTPException(status_code=404)
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
@@ -132,8 +140,13 @@ async def gloss2timeline(payload: GlossIn):
         jsonschema_validate(timeline, _TIMELINE_SCHEMA)
     return timeline
 
+def require_api_key(x_api_key: str | None = Header(default=None)):
+    if settings.api_key and x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="invalid api key")
+
+
 @app.post("/ingest_text")
-async def ingest_text(payload: IngestText):
+async def ingest_text(payload: IngestText, _: None = Depends(require_api_key)):
     start = time.perf_counter()
     tokens = tokenize_ko(payload.text)
     glosses = ko_to_gloss(tokens)
@@ -178,6 +191,11 @@ def _first_diff_index(a: List[str], b: List[str]) -> int:
 
 @app.websocket("/ws/ingest")
 async def ws_ingest(ws: WebSocket):
+    # optional API key via query param 'key'
+    key = ws.query_params.get("key")
+    if settings.api_key and key != settings.api_key:
+        await ws.close(code=4401)
+        return
     await ws.accept()
     try:
         while True:
@@ -242,3 +260,11 @@ async def ws_ingest(ws: WebSocket):
             await ws.close()
         except Exception:
             pass
+class LexiconUpdate(BaseModel):
+    items: Dict[str, str]
+
+
+@app.post("/lexicon/update")
+async def lexicon_update(payload: LexiconUpdate, _: None = Depends(require_api_key)):
+    set_overlay_lexicon(payload.items)
+    return {"ok": True, "size": len(payload.items)}
