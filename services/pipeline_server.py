@@ -591,6 +591,8 @@ class Stats:
             "ingest_rate_per_sec_1m": round(ingest_rate, 3),
             "last_ingest_to_bc_ms": self.last_ingest_to_bc_ms,
             "latency_ms": {"p50": p50, "p90": p90, "p99": p99, "hist": hist, "recent": recent},
+            "session_count": len(sessions),
+            "ws_clients": len(manager.active) if hasattr(manager, 'active') else None,
         }
 
 

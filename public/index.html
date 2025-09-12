@@ -39,6 +39,8 @@
     <div>ingest final: <b id="ing_f">0</b></div>
     <div>ingest rate(1m): <b id="ing_rate">0</b>/s</div>
     <div>last ingest→broadcast: <b id="last_lat">-</b> ms</div>
+    <div>sessions: <b id="sess_count">0</b></div>
+    <div>ws clients: <b id="ws_clients">0</b></div>
   </div>
   <div class="row" style="gap:24px;">
     <div>p50: <b id="p50">-</b> ms</div>
@@ -177,6 +179,8 @@
             document.getElementById('ing_f').textContent = s.ingest_final_total ?? 0;
             document.getElementById('ing_rate').textContent = s.ingest_rate_per_sec_1m ?? 0;
             document.getElementById('last_lat').textContent = s.last_ingest_to_bc_ms ?? '-';
+            document.getElementById('sess_count').textContent = s.session_count ?? 0;
+            document.getElementById('ws_clients').textContent = s.ws_clients ?? 0;
             if (s.latency_ms){
               document.getElementById('p50').textContent = s.latency_ms.p50 ?? '-';
               document.getElementById('p90').textContent = s.latency_ms.p90 ?? '-';
