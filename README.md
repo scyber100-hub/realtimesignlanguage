@@ -36,6 +36,11 @@ AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
 - WS 인입: `python scripts/mock_asr_stream.py --text "안녕하세요 오늘 한국 날씨 속보 태풍"`
 - 서버는 최초 `timeline`, 이후 `timeline.replace(from_t_ms)` 메시지를 브로드캐스트합니다.
 
+오프라인 ASR(Vosk, 선택)
+- 준비: `pip install vosk` 후 한국어 모델 다운로드(예: `vosk-model-small-ko-0.22`) 후 경로 지정
+- 실행: `python scripts/vosk_ingest_from_rtmp.py --model <vosk_model_dir> --rtmp rtmp://origin/live/stream`
+- 동작: FFmpeg로 오디오 추출→Vosk 실시간 인식→/ws/ingest로 partial/final 전송
+
 폴더 구조
 - `services/` 서비스 경계 문서 및 스텁
 - `packages/` 규칙/타임라인 생성 라이브러리(파이썬)
