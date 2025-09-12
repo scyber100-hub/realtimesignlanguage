@@ -64,6 +64,13 @@ API 요약(서버 포함)
 - `WS /ws/ingest` 증분 인입(`partial`/`final`) → `timeline`/`timeline.replace` 브로드캐스트
 - `WS /ws/timeline` 타임라인 구독
 
+Docker 실행
+- 로컬 빌드/실행: `powershell -ExecutionPolicy Bypass -File scripts/run_docker.ps1`
+- 또는: `docker compose up --build`
+
+Self-check
+- 빠른 점검: `python scripts/self_check.py`
+
 GitHub 푸시
 - 리포지토리를 초기화하고 푸시하려면(예시):
   1) `git init && git add . && git commit -m "init: kor→ksl realtime scaffold"`
