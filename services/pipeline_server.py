@@ -144,6 +144,9 @@ async def get_config(_: None = Depends(require_api_key)):
         "include_aux_channels": settings.include_aux_channels,
         "max_ingest_rps": settings.max_ingest_rps,
         "enable_metrics": settings.enable_metrics,
+        "latency_p90_warn_ms": settings.latency_p90_warn_ms,
+        "replace_ratio_warn": settings.replace_ratio_warn,
+        "rate_limit_ratio_warn": settings.rate_limit_ratio_warn,
     }
 
 
@@ -737,6 +740,7 @@ class Stats:
             "latency_ms": {"p50": p50, "p90": p90, "p99": p99, "hist": hist, "recent": recent},
             "session_count": len(sessions),
             "ws_clients": len(manager.active) if hasattr(manager, 'active') else None,
+            "rate_limit_ratio": (round(self.rate_limited_total / (self.ingest_partial + self.ingest_final), 3) if (self.ingest_partial + self.ingest_final) else 0),
         }
 
 
