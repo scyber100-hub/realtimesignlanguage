@@ -180,7 +180,7 @@ async def get_last_timeline(_: None = Depends(require_api_key)):
         return {"exists": False}
 
 @app.get("/events/recent")
-async def events_recent(n: int = 100, _: None = Depends(require_api_key)):
+async def events_recent(n: int = 100, session_id: Optional[str] = None, _: None = Depends(require_api_key)):
     try:
         n = max(1, min(int(n), RECENT_EVENTS_MAX))
     except Exception:
@@ -189,11 +189,13 @@ async def events_recent(n: int = 100, _: None = Depends(require_api_key)):
         items = RECENT_EVENTS[-n:]
     else:
         items = list(RECENT_EVENTS)[-n:]
+    if session_id:
+        items = [x for x in items if x.get("session_id") == session_id]
     return {"count": len(items), "items": items}
 
 
 @app.get("/events/summary")
-async def events_summary(n: int = 100, _: None = Depends(require_api_key)):
+async def events_summary(n: int = 100, session_id: Optional[str] = None, _: None = Depends(require_api_key)):
     try:
         n = max(1, min(int(n), RECENT_EVENTS_MAX))
     except Exception:
@@ -202,6 +204,8 @@ async def events_summary(n: int = 100, _: None = Depends(require_api_key)):
         items = RECENT_EVENTS[-n:]
     else:
         items = list(RECENT_EVENTS)[-n:]
+    if session_id:
+        items = [x for x in items if x.get("session_id") == session_id]
     total = len(items)
     replaces = len([x for x in items if x.get("type") == "timeline.replace"])
     ratio = (replaces / total) if total else 0
@@ -769,6 +773,7 @@ async def sessions_full(_: None = Depends(require_api_key)):
             "start_ms": st.start_ms,
             "gap_ms": st.gap_ms,
             "last_update_ms": getattr(st, 'last_update_ms', 0),
+            "meta": getattr(st, 'meta', {}),
         })
     return {"count": len(items), "items": items}
 

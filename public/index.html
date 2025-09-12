@@ -79,12 +79,13 @@
   <div class="row">
     <button id="sessList">GET /sessions</button>
     <input id="sessId" type="text" placeholder="session_id(optional for reset)"/>
+    <input id="sessFilter" type="text" placeholder="filter session_id (optional)"/>
     <button id="sessReset">POST /sessions/reset</button>
     <label><input type="checkbox" id="autoSess"/> auto-refresh</label>
     <input id="sessInt" type="number" value="5" min="1" style="width:60px;"/>s
   </div>
   <table id="sessTable" border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px; min-width:600px;">
-    <thead><tr><th>session</th><th>events</th><th>text_len</th><th>last_update_ms</th></tr></thead>
+    <thead><tr><th>session</th><th>events</th><th>text_len</th><th>last_update_ms</th><th>meta</th></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -343,9 +344,13 @@
       const data = await res.json();
       const tb = document.querySelector('#sessTable tbody');
       tb.innerHTML = '';
-      (data.items||[]).forEach(r => {
+      let rows = (data.items||[]);
+      const f = (document.getElementById('sessFilter').value||'').trim();
+      if (f) rows = rows.filter(x => x.session_id === f);
+      rows.forEach(r => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${r.session_id}</td><td>${r.events}</td><td>${r.text_len}</td><td>${r.last_update_ms||''}</td>`;
+        const meta = r.meta ? JSON.stringify(r.meta) : '';
+        tr.innerHTML = `<td>${r.session_id}</td><td>${r.events}</td><td>${r.text_len}</td><td>${r.last_update_ms||''}</td><td>${meta}</td>`;
         tb.appendChild(tr);
       });
       log('GET /sessions_full => ' + JSON.stringify(data));
@@ -364,17 +369,14 @@
       const headers = {};
       const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
       const n = parseInt(document.getElementById('evN').value || '50');
-      const res = await fetch(`/events/recent?n=${n}`, { headers });
+      const sidFilter = (document.getElementById('evSessFilter').value||'').trim();
+      const res = await fetch(`/events/recent?n=${n}${sidFilter?`&session_id=${encodeURIComponent(sidFilter)}`:''}`, { headers });
       const data = await res.json();
-      const filter = (document.getElementById('evSessFilter').value||'').trim();
-      if (filter) {
-        data.items = (data.items||[]).filter(x => x.session_id === filter);
-        data.count = data.items.length;
-      }
+      // client-side filter not required anymore; server filters if provided
       document.getElementById('evOut').textContent = JSON.stringify(data, null, 2);
       log('GET /events/recent');
       // fetch summary
-      const sum = await (await fetch(`/events/summary?n=${n}`, { headers })).json();
+      const sum = await (await fetch(`/events/summary?n=${n}${sidFilter?`&session_id=${encodeURIComponent(sidFilter)}`:''}`, { headers })).json();
       document.getElementById('evSummary').textContent = `summary: total=${sum.total} replace=${sum.replaces} ratio=${sum.ratio}`;
       // update rep spark values (keep last 60)
       repValues.push(sum.ratio);
