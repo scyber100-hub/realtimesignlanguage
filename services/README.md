@@ -44,6 +44,7 @@ pipeline-server (본 리포지토리 포함)
   - GET /lexicon/versions → 저장된 스냅샷 목록(name, mtime, size)
   - POST /lexicon/rollback { name } → 지정 스냅샷으로 롤백 적용
   - GET /timeline/last → 마지막 브로드캐스트 타임라인 페이로드(JSON)
+  - GET /events/recent?n=100 → 최근 타임라인 이벤트 요약 목록(count/items)
   - WS /ws/timeline → 타임라인 push 수신
   - WS /ws/ingest → {type:"partial"|"final", session_id, text, start_ms?, gap_ms?} 증분 인입
     - 서버는 최초 full `timeline`, 이후 차이점부터 `timeline.replace`(from_t_ms 포함) 전송

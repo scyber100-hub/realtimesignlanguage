@@ -176,6 +176,18 @@ async def get_last_timeline(_: None = Depends(require_api_key)):
     except Exception:
         return {"exists": False}
 
+@app.get("/events/recent")
+async def events_recent(n: int = 100, _: None = Depends(require_api_key)):
+    try:
+        n = max(1, min(int(n), RECENT_EVENTS_MAX))
+    except Exception:
+        n = 100
+    if isinstance(RECENT_EVENTS, list):
+        items = RECENT_EVENTS[-n:]
+    else:
+        items = list(RECENT_EVENTS)[-n:]
+    return {"count": len(items), "items": items}
+
 
 class TextIn(BaseModel):
     text: str
@@ -218,6 +230,12 @@ TIMELINE_LOG = LOG_DIR / "timeline.log"
 VERS_DIR = Path("lexicon/versions")
 VERS_DIR.mkdir(parents=True, exist_ok=True)
 LAST_TIMELINE_PATH = LOG_DIR / "last_timeline.json"
+RECENT_EVENTS_MAX = 300
+try:
+    from collections import deque as _deque
+    RECENT_EVENTS = _deque(maxlen=RECENT_EVENTS_MAX)
+except Exception:
+    RECENT_EVENTS = []
 
 
 def _log_timeline(evt_type: str, payload: Dict[str, Any]):
@@ -234,6 +252,21 @@ def _log_timeline(evt_type: str, payload: Dict[str, Any]):
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         try:
             LAST_TIMELINE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            item = {
+                "ts": rec["ts"],
+                "type": rec["type"],
+                "session_id": rec["session_id"],
+                "event_count": rec["event_count"],
+            }
+            if isinstance(RECENT_EVENTS, list):
+                RECENT_EVENTS.append(item)
+                if len(RECENT_EVENTS) > RECENT_EVENTS_MAX:
+                    del RECENT_EVENTS[0:len(RECENT_EVENTS)-RECENT_EVENTS_MAX]
+            else:
+                RECENT_EVENTS.append(item)
         except Exception:
             pass
     except Exception as e:

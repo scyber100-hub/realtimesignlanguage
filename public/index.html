@@ -76,6 +76,17 @@
     <input id="sessId" type="text" placeholder="session_id(optional for reset)"/>
     <button id="sessReset">POST /sessions/reset</button>
   </div>
+  <table id="sessTable" border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px; min-width:600px;">
+    <thead><tr><th>session</th><th>events</th><th>text_len</th><th>last_update_ms</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2 style="margin-top:16px; font-size:16px;">Recent Events</h2>
+  <div class="row">
+    <button id="evFetch">GET /events/recent</button>
+    <input id="evN" type="number" value="50" min="1" max="300" style="width:80px;"/>
+  </div>
+  <pre id="evOut" style="display:block; max-height:180px;"></pre>
 
   <script>
     const logEl = document.getElementById('log');
@@ -296,15 +307,32 @@
 
     // Sessions handlers
     document.getElementById('sessList').onclick = async () => {
-      const res = await fetch('/sessions');
+      const res = await fetch('/sessions_full');
       const data = await res.json();
-      log('GET /sessions => ' + JSON.stringify(data));
+      const tb = document.querySelector('#sessTable tbody');
+      tb.innerHTML = '';
+      (data.items||[]).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.session_id}</td><td>${r.events}</td><td>${r.text_len}</td><td>${r.last_update_ms||''}</td>`;
+        tb.appendChild(tr);
+      });
+      log('GET /sessions_full => ' + JSON.stringify(data));
     };
     document.getElementById('sessReset').onclick = async () => {
       const sid = document.getElementById('sessId').value;
       const res = await fetch('/sessions/reset', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ session_id: sid || null })});
       const data = await res.json();
       log('POST /sessions/reset => ' + JSON.stringify(data));
+    };
+
+    document.getElementById('evFetch').onclick = async () => {
+      const headers = {};
+      const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
+      const n = parseInt(document.getElementById('evN').value || '50');
+      const res = await fetch(`/events/recent?n=${n}`, { headers });
+      const data = await res.json();
+      document.getElementById('evOut').textContent = JSON.stringify(data, null, 2);
+      log('GET /events/recent');
     };
   </script>
 </body>
