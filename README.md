@@ -71,12 +71,17 @@ API 요약(서버 포함)
 - `GET /healthz` 상태 확인
 - `GET /metrics` Prometheus 지표
 - `GET /stats` 경량 런타임 통계(JSON)
+- `GET /config` 경량 설정 조회
 - `POST /text2gloss { text }` → `{ gloss, conf }`
 - `POST /gloss2timeline { gloss[], conf?[], start_ms?, gap_ms? }` → SignTimeline(JSON)
 - `POST /ingest_text { text, start_ms?, gap_ms?, id? }` → WS 브로드캐스트 포함
 - `WS /ws/ingest` 증분 인입(`partial`/`final`) → `timeline`/`timeline.replace` 브로드캐스트
   - `WS /ws/timeline` 타임라인 구독
   - 선택: 메시지에 `origin_ts`(ms) 포함 시 ingest→broadcast 지연 측정
+
+관리/디버그 API
+- `POST /config/update { include_aux_channels?, max_ingest_rps? }`
+- `GET /timeline/last` 마지막 브로드캐스트 페이로드(JSON)
 
 보안/설정(환경 변수)
 - `API_KEY`: 설정 시 `POST /ingest_text`, `POST /lexicon/update`, `WS /ws/ingest?key=...` 에서 키 필요

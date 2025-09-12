@@ -21,6 +21,13 @@
     <button id="cfgBtn">GET /config</button>
     <span id="cfgOut" class="badge"></span>
   </div>
+  <div class="row" style="gap:10px; align-items: center;">
+    <label><input type="checkbox" id="auxToggle"/> include_aux_channels</label>
+    <label>max_ingest_rps <input type="number" id="rpsInput" min="1" style="width:80px;"/></label>
+    <button id="cfgUpdate">POST /config/update</button>
+    <button id="lastTl">GET /timeline/last</button>
+  </div>
+  <pre id="lastTlOut" style="display:block; max-height:220px;"></pre>
   <div class="row">
     <input id="text" type="text" placeholder="텍스트 입력 (예: 안녕하세요 한국 날씨)"/>
     <button id="send">POST /ingest_text</button>
@@ -209,7 +216,34 @@
       const res = await fetch('/config', { headers });
       const data = await res.json();
       document.getElementById('cfgOut').textContent = JSON.stringify(data);
+      // populate controls
+      if (data && typeof data.include_aux_channels !== 'undefined') {
+        document.getElementById('auxToggle').checked = !!data.include_aux_channels;
+      }
+      if (data && typeof data.max_ingest_rps !== 'undefined') {
+        document.getElementById('rpsInput').value = data.max_ingest_rps;
+      }
       log('GET /config => ' + JSON.stringify(data));
+    };
+
+    document.getElementById('cfgUpdate').onclick = async () => {
+      const headers = getHeaders();
+      const body = {
+        include_aux_channels: document.getElementById('auxToggle').checked,
+        max_ingest_rps: parseInt(document.getElementById('rpsInput').value || '0') || undefined,
+      };
+      const res = await fetch('/config/update', { method: 'POST', headers, body: JSON.stringify(body) });
+      const data = await res.json();
+      log('POST /config/update => ' + JSON.stringify(data));
+    };
+
+    document.getElementById('lastTl').onclick = async () => {
+      const headers = {};
+      const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
+      const res = await fetch('/timeline/last', { headers });
+      const data = await res.json();
+      document.getElementById('lastTlOut').textContent = JSON.stringify(data, null, 2);
+      log('GET /timeline/last');
     };
 
     // Lexicon handlers
