@@ -55,6 +55,15 @@ AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
 - `docs/UNITY_ADAPTER.md` Unity 연동 규약
  - `unity/` Unity용 C# 스크립트와 사용법
 
+API 요약(서버 포함)
+- `GET /healthz` 상태 확인
+- `GET /metrics` Prometheus 지표
+- `POST /text2gloss { text }` → `{ gloss, conf }`
+- `POST /gloss2timeline { gloss[], conf?[], start_ms?, gap_ms? }` → SignTimeline(JSON)
+- `POST /ingest_text { text, start_ms?, gap_ms?, id? }` → WS 브로드캐스트 포함
+- `WS /ws/ingest` 증분 인입(`partial`/`final`) → `timeline`/`timeline.replace` 브로드캐스트
+- `WS /ws/timeline` 타임라인 구독
+
 GitHub 푸시
 - 리포지토리를 초기화하고 푸시하려면(예시):
   1) `git init && git add . && git commit -m "init: kor→ksl realtime scaffold"`

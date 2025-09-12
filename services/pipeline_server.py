@@ -4,6 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
 import time
+import json
+
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from fastapi.responses import Response
+from jsonschema import validate as jsonschema_validate, Draft202012Validator
+from pathlib import Path
 
 from packages.ksl_rules import tokenize_ko, ko_to_gloss
 from packages.sign_timeline import compile_glosses
@@ -70,20 +76,73 @@ class SessionState(BaseModel):
 
 sessions: Dict[str, SessionState] = {}
 
+# Metrics
+REQ_LAT = Histogram("pipeline_request_latency_seconds", "Latency of API processing", labelnames=("endpoint",))
+TIMELINE_BC = Counter("timeline_broadcast_total", "Number of timeline messages broadcast")
+INGEST_MSG = Counter("ingest_messages_total", "Number of ingest messages", labelnames=("type",))
+
+# Load timeline schema for validation
+_SCHEMA_PATH = Path("schemas/sign_timeline.schema.json")
+_TIMELINE_SCHEMA = None
+if _SCHEMA_PATH.exists():
+    try:
+        _TIMELINE_SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(_TIMELINE_SCHEMA)
+    except Exception:
+        _TIMELINE_SCHEMA = None
+
 
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "ts": int(time.time() * 1000)}
 
+@app.get("/metrics")
+async def metrics():
+    data = generate_latest()
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+class TextIn(BaseModel):
+    text: str
+
+
+@app.post("/text2gloss")
+async def text2gloss(payload: TextIn):
+    start = time.perf_counter()
+    tokens = tokenize_ko(payload.text)
+    glosses = ko_to_gloss(tokens)
+    REQ_LAT.labels("text2gloss").observe(time.perf_counter() - start)
+    return {"gloss": [g for g, _ in glosses], "conf": [c for _, c in glosses]}
+
+
+class GlossIn(BaseModel):
+    gloss: List[str]
+    conf: Optional[List[float]] = None
+    start_ms: int = 0
+    gap_ms: int = 60
+
+
+@app.post("/gloss2timeline")
+async def gloss2timeline(payload: GlossIn):
+    start = time.perf_counter()
+    glosses = list(zip(payload.gloss, payload.conf or [0.9] * len(payload.gloss)))
+    timeline = compile_glosses(glosses, start_ms=payload.start_ms, gap_ms=payload.gap_ms)
+    REQ_LAT.labels("gloss2timeline").observe(time.perf_counter() - start)
+    if _TIMELINE_SCHEMA is not None:
+        jsonschema_validate(timeline, _TIMELINE_SCHEMA)
+    return timeline
 
 @app.post("/ingest_text")
 async def ingest_text(payload: IngestText):
+    start = time.perf_counter()
     tokens = tokenize_ko(payload.text)
     glosses = ko_to_gloss(tokens)
     timeline = compile_glosses(glosses, start_ms=payload.start_ms, gap_ms=payload.gap_ms)
     if payload.id:
         timeline["id"] = payload.id
     await manager.broadcast_json({"type": "timeline", "data": timeline})
+    TIMELINE_BC.inc()
+    REQ_LAT.labels("ingest_text").observe(time.perf_counter() - start)
     return {"ok": True, "timeline": timeline}
 
 
@@ -124,6 +183,7 @@ async def ws_ingest(ws: WebSocket):
         while True:
             msg = await ws.receive_json()
             payload = StreamIn(**msg)
+            INGEST_MSG.labels(payload.type).inc()
             st = sessions.get(payload.session_id)
             if not st:
                 st = SessionState()
@@ -158,6 +218,7 @@ async def ws_ingest(ws: WebSocket):
                     "session_id": payload.session_id,
                     "data": new_timeline,
                 })
+                TIMELINE_BC.inc()
             else:
                 await manager.broadcast_json({
                     "type": "timeline.replace",
@@ -168,6 +229,7 @@ async def ws_ingest(ws: WebSocket):
                         "events": new_timeline["events"][diff_idx:],
                     },
                 })
+                TIMELINE_BC.inc()
 
             st.events = new_timeline["events"]
 

@@ -31,7 +31,10 @@ pipeline-server (본 리포지토리 포함)
 - FastAPI + WebSocket
 - 엔드포인트:
   - GET /healthz → 상태 확인
+  - GET /metrics → Prometheus 지표 노출
   - POST /ingest_text { text, start_ms?, gap_ms?, id? } → SignTimeline 생성 및 WS 브로드캐스트
+  - POST /text2gloss { text } → { gloss, conf }
+  - POST /gloss2timeline { gloss[], conf?[], start_ms?, gap_ms? } → SignTimeline(JSON)
   - WS /ws/timeline → 타임라인 push 수신
   - WS /ws/ingest → {type:"partial"|"final", session_id, text, start_ms?, gap_ms?} 증분 인입
     - 서버는 최초 full `timeline`, 이후 차이점부터 `timeline.replace`(from_t_ms 포함) 전송
