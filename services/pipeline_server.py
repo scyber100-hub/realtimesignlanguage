@@ -355,6 +355,35 @@ async def _on_startup():
                 logger.info(f"Loaded overlay lexicon from {p}")
     except Exception as e:
         logger.warning(f"Lexicon load failed: {e}")
+
+
+@app.get("/sessions")
+async def list_sessions(_: None = Depends(require_api_key)):
+    out = []
+    for sid, st in sessions.items():
+        out.append({
+            "session_id": sid,
+            "text_len": len(st.text or ""),
+            "events": len(st.events or []),
+            "start_ms": st.start_ms,
+            "gap_ms": st.gap_ms,
+        })
+    return {"count": len(out), "items": out}
+
+
+class ResetReq(BaseModel):
+    session_id: Optional[str] = None
+
+
+@app.post("/sessions/reset")
+async def reset_sessions(req: ResetReq, _: None = Depends(require_api_key)):
+    if req.session_id:
+        sessions.pop(req.session_id, None)
+        return {"ok": True, "cleared": [req.session_id]}
+    else:
+        cleared = list(sessions.keys())
+        sessions.clear()
+        return {"ok": True, "cleared": cleared}
 class LexiconUpdate(BaseModel):
     items: Dict[str, str]
 

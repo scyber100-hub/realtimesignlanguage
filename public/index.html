@@ -35,6 +35,20 @@
   <pre id="log"></pre>
   <canvas id="timeline" width="900" height="120" style="border:1px solid #333; margin-top:10px;"></canvas>
 
+  <h2 style="margin-top:16px; font-size:16px;">Lexicon</h2>
+  <div class="row">
+    <button id="lexGet">GET /lexicon</button>
+    <button id="lexSet">POST /lexicon/update</button>
+  </div>
+  <textarea id="lexArea" rows="6" style="width:900px; font-family:monospace;"></textarea>
+
+  <h2 style="margin-top:16px; font-size:16px;">Sessions</h2>
+  <div class="row">
+    <button id="sessList">GET /sessions</button>
+    <input id="sessId" type="text" placeholder="session_id(optional for reset)"/>
+    <button id="sessReset">POST /sessions/reset</button>
+  </div>
+
   <script>
     const logEl = document.getElementById('log');
     const statusEl = document.getElementById('status');
@@ -110,6 +124,38 @@
 
     // auto-connect
     connect();
+
+    // Lexicon handlers
+    document.getElementById('lexGet').onclick = async () => {
+      const res = await fetch('/lexicon');
+      const data = await res.json();
+      document.getElementById('lexArea').value = JSON.stringify(data.items || {}, null, 2);
+      log('GET /lexicon');
+    };
+    document.getElementById('lexSet').onclick = async () => {
+      let txt = document.getElementById('lexArea').value;
+      try {
+        const obj = JSON.parse(txt || '{}');
+        const res = await fetch('/lexicon/update', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ items: obj })});
+        const data = await res.json();
+        log('POST /lexicon/update => ' + JSON.stringify(data));
+      } catch (e) {
+        alert('Invalid JSON');
+      }
+    };
+
+    // Sessions handlers
+    document.getElementById('sessList').onclick = async () => {
+      const res = await fetch('/sessions');
+      const data = await res.json();
+      log('GET /sessions => ' + JSON.stringify(data));
+    };
+    document.getElementById('sessReset').onclick = async () => {
+      const sid = document.getElementById('sessId').value;
+      const res = await fetch('/sessions/reset', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ session_id: sid || null })});
+      const data = await res.json();
+      log('POST /sessions/reset => ' + JSON.stringify(data));
+    };
   </script>
 </body>
 <span></span>
