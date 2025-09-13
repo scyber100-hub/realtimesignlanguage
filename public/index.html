@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8"/>
@@ -295,7 +295,9 @@
       if (!ul) return;
       ul.innerHTML = '';
       const fmt = (ms)=>{ try { return new Date(ms).toLocaleTimeString(); } catch { return String(ms); } };
-      recentAlerts.slice().reverse().forEach(a => {
+      const filterEl = document.getElementById('alertsFilter');
+      const filter = filterEl ? filterEl.value : 'all';
+      (filter==='all' ? recentAlerts.slice().reverse() : recentAlerts.slice().reverse().filter(a => a.type === filter)).forEach(a => {
         const li = document.createElement('li');
         const color = a.type === 'latency_p90' ? '#ff6b6b' : (a.type === 'replace_ratio' ? '#ff66cc' : '#ff9933');
         li.innerHTML = `<span class="badge" style="background:${color}; color:#111;">${a.type}</span> <b>${(a.value ?? a.p90) ?? ''}</b> (th=${a.threshold ?? ''}) <span style="color:#999">@ ${fmt(a.ts)}</span>`;
@@ -505,6 +507,25 @@
       log('POST /events/clear => ' + JSON.stringify(data));
     };
 
+    // Alerts panel handlers
+    const btnAR = document.getElementById('alertsRefresh'); if (btnAR) btnAR.onclick = fetchAlerts;
+    let alertsTimer = null;
+    const cbAuto = document.getElementById('alertsAuto'); if (cbAuto) cbAuto.onchange = (e)=>{
+      if (e.target.checked) {
+        const s = Math.max(2, parseInt(document.getElementById('alertsInt').value||'7'));
+        alertsTimer = setInterval(fetchAlerts, s*1000);
+      } else { if (alertsTimer) { clearInterval(alertsTimer); alertsTimer = null; } }
+    };
+    const selAF = document.getElementById('alertsFilter'); if (selAF) selAF.onchange = renderAlerts;
+    const btnAC = document.getElementById('alertsClear'); if (btnAC) btnAC.onclick = () => { recentAlerts.length = 0; renderAlerts(); };
+    const btnAX = document.getElementById('alertsExport'); if (btnAX) btnAX.onclick = () => {
+      const data = JSON.stringify(recentAlerts, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'alerts.json'; a.click();
+      URL.revokeObjectURL(url);
+    };
+
     // auto refresh toggles
     let sessTimer = null, evTimer = null;
     document.getElementById('autoSess').onchange = (e) => {
@@ -523,3 +544,4 @@
 </body>
 <span></span>
 </html>
+

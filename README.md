@@ -1,4 +1,4 @@
-AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
+﻿AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
 
 목표
 - 방향: 한국어 → 한국수어(KSL)
@@ -135,3 +135,12 @@ GitHub 푸시
   2) `git remote add origin https://github.com/scyber100-hub/realtimesignlanguage.git`
   3) `git push -u origin HEAD`
   - 토큰/권한 필요 시 GitHub PAT를 사용하세요.
+
+업데이트(경보/튜닝/대시보드)
+- 서버
+  - GET /stats/alerts: p90 지연/교체 비율/레이트리밋 비율 임계치 초과시 경보 반환
+  - 교체 품질 튜닝 환경변수: REPLACE_MIN_EVENTS(기본2), REPLACE_MIN_MS(기본300), REPLACE_MIN_INTERVAL_MS(기본150)
+  - POST /config/update: replace_min_events, replace_min_ms, replace_min_interval_ms 실시간 조정
+- 대시보드(public/index.html)
+  - 상단 경보 배지(latency/replace/rate-limit)
+  - Alerts 패널: 수동/자동 새로고침, 타입 필터, JSON 내보내기
