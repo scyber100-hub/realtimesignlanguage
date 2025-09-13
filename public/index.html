@@ -25,6 +25,15 @@
     <label><input type="checkbox" id="auxToggle"/> include_aux_channels</label>
     <label>max_ingest_rps <input type="number" id="rpsInput" min="1" style="width:80px;"/></label>
     <label>max_replace_future_ms <input type="number" id="repWin" min="0" style="width:120px;"/></label>
+    <label>sort
+      <select id="sessSort">
+        <option value="">none</option>
+        <option value="p90">lat_p90 desc</option>
+        <option value="rep">rep_recent desc</option>
+        <option value="rl">rl_ratio desc</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="warnOnly"/> show warnings only</label>
     <button id="cfgUpdate">POST /config/update</button>
     <button id="lastTl">GET /timeline/last</button>
     <label>p90 warn(ms) <input type="number" id="latWarn" value="1200" style="width:80px;"/></label>
@@ -410,7 +419,21 @@
       let rows = (data.items||[]);
       const f = (document.getElementById('sessFilter').value||'').trim();
       if (f) rows = rows.filter(x => x.session_id === f);
-      rows.forEach(r => {
+      const sortKey = (document.getElementById('sessSort').value || '').trim();
+      if (sortKey) {
+        const keyMap = { p90: 'latency_p90_ms', rep: 'replace_ratio_recent', rl: 'rate_limit_ratio_recent' };
+        const k = keyMap[sortKey] || null;
+        if (k) rows.sort((a,b) => ((b[k]||0) - (a[k]||0)));
+      }
+      const warnOnly = document.getElementById('warnOnly').checked;
+      const isWarn = (r) => {
+        const p90 = r.latency_p90_ms, rep = r.replace_ratio_recent, rl = r.rate_limit_ratio_recent;
+        if (typeof p90 === 'number' && p90 > (cfg.latency_p90_warn_ms||1200)) return true;
+        if (typeof rep === 'number' && rep > (cfg.replace_ratio_warn||0.5)) return true;
+        if (typeof rl === 'number' && rl > (cfg.rate_limit_ratio_warn||0.1)) return true;
+        return false;
+      };
+      (warnOnly ? rows.filter(isWarn) : rows).forEach(r => {
         const tr = document.createElement('tr');
         const meta = r.meta ? JSON.stringify(r.meta) : '';
         const lastTxt = r.last_text_preview || '';
