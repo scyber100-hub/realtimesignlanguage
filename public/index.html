@@ -21,6 +21,11 @@
     <button id="cfgBtn">GET /config</button>
     <span id="cfgOut" class="badge"></span>
   </div>
+  <div class="row" id="alertBadges" style="gap:8px;">
+    <span class="badge" id="badgeLat" title="Latency p90 alert">latency: ok</span>
+    <span class="badge" id="badgeRep" title="Replace ratio alert">replace: ok</span>
+    <span class="badge" id="badgeRL" title="Rate limit ratio alert">rate-limit: ok</span>
+  </div>
   <div class="row" style="gap:10px; align-items: center;">
     <label><input type="checkbox" id="auxToggle"/> include_aux_channels</label>
     <label>max_ingest_rps <input type="number" id="rpsInput" min="1" style="width:80px;"/></label>
@@ -63,6 +68,17 @@
   </div>
   <pre id="log"></pre>
   <canvas id="timeline" width="900" height="120" style="border:1px solid #333; margin-top:10px;"></canvas>
+
+  <h2 style="margin-top:16px; font-size:16px;">Alerts</h2>
+  <div id="alertsPanel" style="border:1px solid #333; padding:8px; border-radius:6px; max-width:900px;">
+    <div class="row" style="gap:10px; align-items:center;">
+      <button id="alertsRefresh">GET /stats/alerts</button>
+      <label><input type="checkbox" id="alertsAuto"/> auto-refresh</label>
+      <input id="alertsInt" type="number" value="7" min="2" style="width:60px;"/> sec
+      <span class="badge" id="alertsCount">0</span>
+    </div>
+    <ul id="alertsList" style="list-style:none; padding-left:10px; margin:6px 0 0 0;"></ul>
+  </div>
 
   <h2 style="margin-top:16px; font-size:16px;">Lexicon</h2>
   <div class="row">
@@ -227,14 +243,16 @@
             document.getElementById('sess_count').textContent = s.session_count ?? 0;
             if (document.getElementById('rl_total')) document.getElementById('rl_total').textContent = s.ingest_rate_limited_total ?? 0;
             document.getElementById('ws_clients').textContent = s.ws_clients ?? 0;
-            if (s.latency_ms){
-              document.getElementById('p50').textContent = s.latency_ms.p50 ?? '-';
-              document.getElementById('p90').textContent = s.latency_ms.p90 ?? '-';
-              document.getElementById('p99').textContent = s.latency_ms.p99 ?? '-';
-              drawHist(s.latency_ms);
-              drawSpark(s.latency_ms.recent);
-            }
-          } else if (data.type === 'timeline' && data.data) {
+          if (s.latency_ms){
+            document.getElementById('p50').textContent = s.latency_ms.p50 ?? '-';
+            document.getElementById('p90').textContent = s.latency_ms.p90 ?? '-';
+            document.getElementById('p99').textContent = s.latency_ms.p99 ?? '-';
+            drawHist(s.latency_ms);
+            drawSpark(s.latency_ms.recent);
+          }
+          // update alert badges
+          updateBadgesFromStats(s);
+        } else if (data.type === 'timeline' && data.data) {
             drawTimeline(data.data.events);
             log(JSON.stringify(data));
           } else if (data.type === 'timeline.replace' && data.data) {
@@ -258,6 +276,67 @@
       const k = document.getElementById('apikey').value;
       if (k) h['x-api-key'] = k;
       return h;
+    };
+
+    // ----- Alerts (badges + panel) -----
+    const badgeLat = document.getElementById('badgeLat');
+    const badgeRep = document.getElementById('badgeRep');
+    const badgeRL  = document.getElementById('badgeRL');
+    let lastWarn = { lat: false, rep: false, rl: false };
+    const recentAlerts = [];
+    const maxAlertItems = 30;
+    function pushAlert(a){
+      recentAlerts.push(a);
+      while (recentAlerts.length > maxAlertItems) recentAlerts.shift();
+      renderAlerts();
+    }
+    function renderAlerts(){
+      const ul = document.getElementById('alertsList');
+      if (!ul) return;
+      ul.innerHTML = '';
+      const fmt = (ms)=>{ try { return new Date(ms).toLocaleTimeString(); } catch { return String(ms); } };
+      recentAlerts.slice().reverse().forEach(a => {
+        const li = document.createElement('li');
+        const color = a.type === 'latency_p90' ? '#ff6b6b' : (a.type === 'replace_ratio' ? '#ff66cc' : '#ff9933');
+        li.innerHTML = `<span class="badge" style="background:${color}; color:#111;">${a.type}</span> <b>${(a.value ?? a.p90) ?? ''}</b> (th=${a.threshold ?? ''}) <span style="color:#999">@ ${fmt(a.ts)}</span>`;
+        ul.appendChild(li);
+      });
+      const ac = document.getElementById('alertsCount'); if (ac) ac.textContent = String(recentAlerts.length);
+    }
+    function setBadge(el, on, text){ if (!el) return; el.textContent = text; el.style.background = on ? '#ffb3b3' : '#e7f7e7'; el.style.color = '#111'; }
+    function updateBadgesFromStats(s){
+      const p90 = s?.latency_ms?.p90 ?? null;
+      const rep = s?.timeline_replace_ratio ?? 0;
+      const rlr = s?.rate_limit_ratio ?? 0;
+      const warnLat = !!s?.warn_latency_p90;
+      const warnRep = !!s?.warn_replace_ratio;
+      const warnRL  = !!s?.warn_rate_limit_ratio;
+      setBadge(badgeLat, warnLat, `latency: ${p90 ?? '-'}`);
+      setBadge(badgeRep, warnRep, `replace: ${rep}`);
+      setBadge(badgeRL,  warnRL,  `rate-limit: ${rlr}`);
+      const now = Date.now();
+      if (warnLat && !lastWarn.lat) pushAlert({ type:'latency_p90', p90, threshold: (window.cfg?.latency_p90_warn_ms), ts: now });
+      if (warnRep && !lastWarn.rep) pushAlert({ type:'replace_ratio', value: rep, threshold: (window.cfg?.replace_ratio_warn), ts: now });
+      if (warnRL  && !lastWarn.rl ) pushAlert({ type:'rate_limit_ratio', value: rlr, threshold: (window.cfg?.rate_limit_ratio_warn), ts: now });
+      lastWarn = { lat: warnLat, rep: warnRep, rl: warnRL };
+    }
+    async function fetchAlerts(){
+      try {
+        const headers = {};
+        const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
+        const res = await fetch('/stats/alerts', { headers });
+        const data = await res.json();
+        const now = Date.now();
+        (data.alerts||[]).forEach(a => { a.ts = a.ts || now; pushAlert(a); });
+      } catch {}
+    }
+    const btnAR = document.getElementById('alertsRefresh'); if (btnAR) btnAR.onclick = fetchAlerts;
+    let alertsTimer = null;
+    const cbAuto = document.getElementById('alertsAuto'); if (cbAuto) cbAuto.onchange = (e)=>{
+      if (e.target.checked) {
+        const s = Math.max(2, parseInt(document.getElementById('alertsInt').value||'7'));
+        alertsTimer = setInterval(fetchAlerts, s*1000);
+      } else { if (alertsTimer) { clearInterval(alertsTimer); alertsTimer = null; } }
     };
 
     document.getElementById('send').onclick = async () => {
