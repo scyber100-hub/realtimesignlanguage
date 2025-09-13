@@ -15,6 +15,8 @@ class Settings:
     include_aux_channels: bool = os.getenv("INCLUDE_AUX_CHANNELS", "1") == "1"
     max_ingest_rps: int = int(os.getenv("MAX_INGEST_RPS", "20"))
     session_ttl_s: int = int(os.getenv("SESSION_TTL_S", "600"))
+    # Replace window safety (ms)
+    max_replace_future_ms: int = int(os.getenv("MAX_REPLACE_FUTURE_MS", "1200"))
     # Alert thresholds
     latency_p90_warn_ms: int = int(os.getenv("LATENCY_P90_WARN_MS", "1200"))
     replace_ratio_warn: float = float(os.getenv("REPLACE_RATIO_WARN", "0.5"))

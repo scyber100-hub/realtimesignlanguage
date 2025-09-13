@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Tuple
+﻿from typing import List, Optional, Dict, Any, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,7 +87,7 @@ app.add_middleware(
 
 manager = ConnectionManager()
 
-# 세션 상태: 증분 처리용(간단 버전)
+# ?몄뀡 ?곹깭: 利앸텇 泥섎━??媛꾨떒 踰꾩쟾)
 class SessionState(BaseModel):
     text: str = ""
     events: List[Dict[str, Any]] = []
@@ -98,6 +98,7 @@ class SessionState(BaseModel):
     last_update_ms: int = 0
     meta: Dict[str, Any] = {}
     last_text: str = ""
+    lat_ms: List[int] = []
 
 sessions: Dict[str, SessionState] = {}
 
@@ -153,6 +154,7 @@ async def get_config(_: None = Depends(require_api_key)):
         "latency_p90_warn_ms": settings.latency_p90_warn_ms,
         "replace_ratio_warn": settings.replace_ratio_warn,
         "rate_limit_ratio_warn": settings.rate_limit_ratio_warn,
+        "max_replace_future_ms": settings.max_replace_future_ms,
     }
 
 
@@ -162,6 +164,7 @@ class ConfigUpdate(BaseModel):
     latency_p90_warn_ms: Optional[int] = None
     replace_ratio_warn: Optional[float] = None
     rate_limit_ratio_warn: Optional[float] = None
+    max_replace_future_ms: Optional[int] = None
 
 
 @app.post("/config/update")
@@ -204,6 +207,15 @@ async def update_config(req: ConfigUpdate, _: None = Depends(require_api_key)):
                 raise ValueError("rate_limit_ratio_warn must be in [0,1]")
             settings.rate_limit_ratio_warn = v
             changed["rate_limit_ratio_warn"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.max_replace_future_ms is not None:
+        try:
+            v = int(req.max_replace_future_ms)
+            if v < 0:
+                raise ValueError("max_replace_future_ms must be >=0")
+            settings.max_replace_future_ms = v
+            changed["max_replace_future_ms"] = v
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "changed": changed}
@@ -376,9 +388,9 @@ async def ingest_text(payload: IngestText, _: None = Depends(require_api_key)):
 async def ws_timeline(ws: WebSocket):
     await manager.connect(ws)
     try:
-        # 단순 keep-alive; 클라이언트는 수신만 해도 됨
+        # ?⑥닚 keep-alive; ?대씪?댁뼵?몃뒗 ?섏떊留??대룄 ??
         while True:
-            # 클라이언트가 ping/pong 또는 noop 메시지 보낼 수 있음
+            # ?대씪?댁뼵?멸? ping/pong ?먮뒗 noop 硫붿떆吏 蹂대궪 ???덉쓬
             _ = await ws.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(ws)
@@ -422,7 +434,7 @@ async def _process_stream_in(payload: StreamIn):
             # collapse internal whitespace
             s2 = " ".join(s2.split())
             # drop trailing punctuation bursts often emitted by streamers
-            while s2 and s2[-1] in ",.!?…·" :
+            while s2 and s2[-1] in ",.!?…·":
                 s2 = s2[:-1].rstrip()
             return s2
         except Exception:
@@ -456,7 +468,20 @@ async def _process_stream_in(payload: StreamIn):
             stats.on_latency(lat)
         TIMELINE_BC.inc()
     else:
-        out = {"type": "timeline.replace", "session_id": payload.session_id, "from_t_ms": from_t, "data": {"id": st.base_id, "events": new_timeline["events"][start_idx:end_idx]}}
+        # safer future window limit for replace
+        cutoff = from_t + int(getattr(settings, 'max_replace_future_ms', 1200) or 0)
+        end_limited = end_idx
+        try:
+            evs = new_timeline["events"]
+            for i in range(start_idx, end_idx):
+                if evs[i]["t_ms"] >= cutoff:
+                    end_limited = i
+                    break
+        except Exception:
+            end_limited = end_idx
+        if end_limited <= start_idx:
+            end_limited = min(start_idx + 1, len(new_timeline["events"]))
+        out = {"type": "timeline.replace", "session_id": payload.session_id, "from_t_ms": from_t, "data": {"id": st.base_id, "events": new_timeline["events"][start_idx:end_limited]}}
         await manager.broadcast_json(out)
         stats.on_timeline()
         _log_timeline("timeline.replace", out)
@@ -464,6 +489,12 @@ async def _process_stream_in(payload: StreamIn):
             lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
             INGEST_TO_BC_MS.observe(lat)
             stats.on_latency(lat)
+            try:
+                st.lat_ms.append(int(lat))
+                if len(st.lat_ms) > 200:
+                    del st.lat_ms[:len(st.lat_ms)-200]
+            except Exception:
+                pass
         TIMELINE_BC.inc()
         stats.on_replace()
     st.events = new_timeline["events"]
@@ -561,7 +592,7 @@ async def ws_ingest(ws: WebSocket):
             if payload.gap_ms is not None:
                 st.gap_ms = int(payload.gap_ms)
 
-            # 전체 텍스트 기준으로 단순 증분 처리
+            # ?꾩껜 ?띿뒪??湲곗??쇰줈 ?⑥닚 利앸텇 泥섎━
             st.text = payload.text
             tokens = tokenize_ko(st.text)
             glosses = ko_to_gloss(tokens)
@@ -574,13 +605,13 @@ async def ws_ingest(ws: WebSocket):
             new_clips = [e["clip"] for e in new_timeline["events"]]
             start_idx, end_idx = _diff_window(old_clips, new_clips)
 
-            # 교체 시작 시간 산정
+            # 援먯껜 ?쒖옉 ?쒓컙 ?곗젙
             if start_idx < len(new_timeline["events"]):
                 from_t = new_timeline["events"][start_idx]["t_ms"]
             else:
                 from_t = new_timeline["events"][-1]["t_ms"] if new_timeline["events"] else 0
 
-            # 메시지 전송: 최초에는 full timeline, 이후에는 replace
+            # 硫붿떆吏 ?꾩넚: 理쒖큹?먮뒗 full timeline, ?댄썑?먮뒗 replace
             if not st.events:
                 out = {
                     "type": "timeline",
@@ -617,7 +648,7 @@ async def ws_ingest(ws: WebSocket):
 
             st.events = new_timeline["events"]
 
-            # 요청자에게도 ack
+            # ?붿껌?먯뿉寃뚮룄 ack
             proc_ms = int((time.perf_counter() - start) * 1000)
             await ws.send_json({"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final", "proc_ms": proc_ms})
     except WebSocketDisconnect:
@@ -685,7 +716,7 @@ async def lexicon_update(payload: LexiconUpdate, _: None = Depends(require_api_k
 
 @app.get("/lexicon")
 async def lexicon_get(_: None = Depends(require_api_key)):
-    # 보안을 위해 오버레이 크기만 공개, 상세는 관리 용도로 반환
+    # 蹂댁븞???꾪빐 ?ㅻ쾭?덉씠 ?ш린留?怨듦컻, ?곸꽭??愿由??⑸룄濡?諛섑솚
     from packages.ksl_rules.rules import _OVERLAY  # type: ignore
     return {"size": len(_OVERLAY), "items": _OVERLAY}
 
@@ -793,7 +824,7 @@ class Stats:
 stats = Stats()
 
 
-# Static files (dashboard) — mount at end so API routes take precedence
+# Static files (dashboard) ??mount at end so API routes take precedence
 
 # Session purger (separate startup hook)
 PURGED_SESS = Counter("sessions_purged_total", "Number of sessions purged due to TTL")
@@ -846,6 +877,17 @@ async def sessions_full(_: None = Depends(require_api_key)):
             rep_ratio = round(rep_e/total_e, 3) if total_e else 0
         except Exception:
             rep_ratio = 0
+        # per-session latency p90 (if collected)
+        try:
+            lats = list(getattr(st, 'lat_ms', []) or [])
+            p90 = None
+            if lats:
+                sl = sorted(lats)
+                import math
+                idx = min(len(sl)-1, max(0, int(math.ceil(0.9*len(sl))-1)))
+                p90 = sl[idx]
+        except Exception:
+            p90 = None
         items.append({
             "session_id": sid,
             "text_len": len(st.text or ""),
@@ -856,6 +898,7 @@ async def sessions_full(_: None = Depends(require_api_key)):
             "meta": getattr(st, 'meta', {}),
             "last_text_preview": preview,
             "replace_ratio_recent": rep_ratio,
+            "latency_p90_ms": p90,
         })
     return {"count": len(items), "items": items}
 
@@ -1030,4 +1073,5 @@ try:
     app.mount('/', StaticFiles(directory='public', html=True), name='public')
 except Exception:
     pass
+
 
