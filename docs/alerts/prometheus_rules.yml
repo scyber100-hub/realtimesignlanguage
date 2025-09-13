@@ -1,0 +1,22 @@
+groups:
+  - name: pipeline-alerts
+    interval: 30s
+    rules:
+      - alert: HighIngestToBroadcastLatencyP90
+        expr: histogram_quantile(0.9, sum(rate(ingest_to_broadcast_ms_bucket[5m])) by (le)) > 1200
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High ingest→broadcast latency p90"
+          description: "p90 latency over 5m > 1200ms"
+
+      - alert: HighRateLimitRatio
+        expr: (rate(ingest_rate_limited_total[5m]) / clamp_min(rate(ingest_messages_total{type=~"partial|final"}[5m]), 1e-9)) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate-limit ratio"
+          description: "Rate-limited / ingest over 5m > 0.1"
+

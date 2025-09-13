@@ -457,7 +457,9 @@
       log('GET /events/recent');
       // fetch summary
       const sum = await (await fetch(`/events/summary?n=${n}${sidFilter?`&session_id=${encodeURIComponent(sidFilter)}`:''}`, { headers })).json();
-      document.getElementById('evSummary').textContent = `summary: total=${sum.total} replace=${sum.replaces} ratio=${sum.ratio}`;
+      const evSumEl = document.getElementById('evSummary');
+      evSumEl.textContent = `summary: total=${sum.total} replace=${sum.replaces} ratio=${sum.ratio}`;
+      evSumEl.style.background = (sum.ratio > (cfg.replace_ratio_warn||0.5)) ? '#ff9aa2' : '#c2f0c2';
       // update rep spark values (keep last 60)
       repValues.push(sum.ratio);
       if (repValues.length > 60) repValues.shift();
