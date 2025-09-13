@@ -105,6 +105,7 @@ sessions: Dict[str, SessionState] = {}
 REQ_LAT = Histogram("pipeline_request_latency_seconds", "Latency of API processing", labelnames=("endpoint",))
 TIMELINE_BC = Counter("timeline_broadcast_total", "Number of timeline messages broadcast")
 INGEST_MSG = Counter("ingest_messages_total", "Number of ingest messages", labelnames=("type",))
+RATE_LIMITED = Counter("ingest_rate_limited_total", "Number of rate-limited ingest events")
 INGEST_TO_BC_MS = Histogram("ingest_to_broadcast_ms", "Latency from ingest message to timeline broadcast in ms")
 BROADCAST_ERR = Counter("timeline_broadcast_errors_total", "Number of websocket broadcast errors")
 WS_CLIENTS = Gauge("websocket_clients", "Number of connected websocket clients")
@@ -130,6 +131,11 @@ async def metrics():
         raise HTTPException(status_code=404)
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)):
+    if settings.api_key and x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="invalid api key")
 
 
 @app.get("/stats")
@@ -289,11 +295,6 @@ async def gloss2timeline(payload: GlossIn):
         jsonschema_validate(timeline, _TIMELINE_SCHEMA)
     return timeline
 
-def require_api_key(x_api_key: str | None = Header(default=None)):
-    if settings.api_key and x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="invalid api key")
-
-
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 TIMELINE_LOG = LOG_DIR / "timeline.log"
@@ -414,8 +415,19 @@ async def _process_stream_in(payload: StreamIn):
     if payload.gap_ms is not None:
         st.gap_ms = int(payload.gap_ms)
 
-    # duplicate suppression for partial streams
-    if payload.type == "partial" and payload.text == st.last_text:
+    # duplicate suppression for partial streams (trim + collapse whitespace + trailing punctuation)
+    def _norm_partial(s: str) -> str:
+        try:
+            s2 = (s or "").strip()
+            # collapse internal whitespace
+            s2 = " ".join(s2.split())
+            # drop trailing punctuation bursts often emitted by streamers
+            while s2 and s2[-1] in ",.!?…·" :
+                s2 = s2[:-1].rstrip()
+            return s2
+        except Exception:
+            return s or ""
+    if payload.type == "partial" and _norm_partial(payload.text) == _norm_partial(st.last_text or ""):
         return {"ok": True, "session_id": payload.session_id, "is_final": False}
     st.text = payload.text
     tokens = tokenize_ko(st.text)
@@ -526,6 +538,7 @@ async def ws_ingest(ws: WebSocket):
     await ws.accept()
     try:
         while True:
+            start = time.perf_counter()
             msg = await ws.receive_json()
             payload = StreamIn(**msg)
             INGEST_MSG.labels(payload.type).inc()
@@ -592,15 +605,15 @@ async def ws_ingest(ws: WebSocket):
                         "events": new_timeline["events"][start_idx:end_idx],
                     },
                 }
-        await manager.broadcast_json(out)
-        stats.on_timeline()
-        _log_timeline("timeline.replace", out)
-        if payload.origin_ts:
-            lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
-            INGEST_TO_BC_MS.observe(lat)
-            stats.on_latency(lat)
-        TIMELINE_BC.inc()
-        stats.on_replace()
+                await manager.broadcast_json(out)
+                stats.on_timeline()
+                _log_timeline("timeline.replace", out)
+                if payload.origin_ts:
+                    lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+                    INGEST_TO_BC_MS.observe(lat)
+                    stats.on_latency(lat)
+                TIMELINE_BC.inc()
+                stats.on_replace()
 
             st.events = new_timeline["events"]
 
@@ -684,6 +697,9 @@ async def log_requests(request, call_next):
         response = await call_next(request)
         return response
     finally:
+        dur = (time.perf_counter() - start) * 1000.0
+        logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
+
 # Lightweight runtime stats (for dashboard)
 class Stats:
     def __init__(self):
@@ -775,16 +791,9 @@ class Stats:
 
 
 stats = Stats()
-        dur = (time.perf_counter() - start) * 1000.0
-        logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
 
 
-# Static files (dashboard)
-try:
-    app.mount("/", StaticFiles(directory="public", html=True), name="public")
-except Exception:
-    # directory may not exist in some envs; ignore mount errors
-    pass
+# Static files (dashboard) — mount at end so API routes take precedence
 
 # Session purger (separate startup hook)
 PURGED_SESS = Counter("sessions_purged_total", "Number of sessions purged due to TTL")
@@ -913,6 +922,8 @@ async def lexicon_rollback(req: LexiconRollbackReq, _: None = Depends(require_ap
         set_overlay_lexicon(items)
         _audit_lexicon({"action": "rollback", "name": req.name, "size": len(items)})
         return {"ok": True, "name": req.name, "size": len(items)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def _audit_lexicon(data: Dict[str, Any], ts: Optional[int] = None) -> None:
@@ -1013,3 +1024,10 @@ async def ws_asr(ws: WebSocket):
             await ws.close()
         except Exception:
             pass
+
+# Mount static after routes
+try:
+    app.mount('/', StaticFiles(directory='public', html=True), name='public')
+except Exception:
+    pass
+
