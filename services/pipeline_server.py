@@ -143,6 +143,19 @@ async def get_stats(_: None = Depends(require_api_key)):
     return stats.snapshot()
 
 
+@app.get("/stats/alerts")
+async def get_stats_alerts(_: None = Depends(require_api_key)):
+    s = stats.snapshot()
+    alerts = []
+    if s.get("warn_latency_p90"):
+        alerts.append({"type": "latency_p90", "p90": s.get("latency_ms",{}).get("p90"), "threshold": get_settings().latency_p90_warn_ms})
+    if s.get("warn_replace_ratio"):
+        alerts.append({"type": "replace_ratio", "value": s.get("timeline_replace_ratio"), "threshold": get_settings().replace_ratio_warn})
+    if s.get("warn_rate_limit_ratio"):
+        alerts.append({"type": "rate_limit_ratio", "value": s.get("rate_limit_ratio"), "threshold": get_settings().rate_limit_ratio_warn})
+    return {"count": len(alerts), "alerts": alerts}
+
+
 @app.get("/config")
 async def get_config(_: None = Depends(require_api_key)):
     return {
@@ -764,7 +777,7 @@ class Stats:
             hist = {"buckets": buckets, "counts": counts}
             # tail (last 30)
             recent = lats[-30:]
-        return {
+        out = {
             "timeline_broadcast_total": self.timeline_total,
             "timeline_rate_per_sec_1m": round(timeline_rate, 3),
             "timeline_replace_total": self.replace_total,
@@ -779,6 +792,18 @@ class Stats:
             "ws_clients": len(manager.active) if hasattr(manager, 'active') else None,
             "rate_limit_ratio": (round(self.rate_limited_total / (self.ingest_partial + self.ingest_final), 3) if (self.ingest_partial + self.ingest_final) else 0),
         }
+        # compute warn flags using current settings
+        try:
+            from services.config import get_settings as _gs
+            _st = _gs()
+            out["warn_latency_p90"] = (out["latency_ms"]["p90"] is not None) and (out["latency_ms"]["p90"] > _st.latency_p90_warn_ms)
+            out["warn_replace_ratio"] = (out["timeline_replace_ratio"] > _st.replace_ratio_warn)
+            out["warn_rate_limit_ratio"] = (out["rate_limit_ratio"] > _st.rate_limit_ratio_warn)
+        except Exception:
+            out["warn_latency_p90"] = False
+            out["warn_replace_ratio"] = False
+            out["warn_rate_limit_ratio"] = False
+        return out
 
 
 stats = Stats()
