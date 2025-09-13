@@ -19,15 +19,31 @@ _CLIPS = {
 DEFAULT_DUR = 650
 
 _FACE_CLIPS = {
+    # Alerts / disasters: 강조 표정
     "BREAKING": {"clip": "FACE_ALERT", "dur_ms": 500},
     "EARTHQUAKE": {"clip": "FACE_ALERT", "dur_ms": 700},
     "TYPHOON": {"clip": "FACE_ALERT", "dur_ms": 700},
+    "ALERT": {"clip": "FACE_ALERT", "dur_ms": 600},
+    "ADVISORY": {"clip": "FACE_ALERT", "dur_ms": 600},
+    # Severe weather keywords
+    "HEAVY_RAIN": {"clip": "FACE_ALERT", "dur_ms": 600},
+    "HEAVY_SNOW": {"clip": "FACE_ALERT", "dur_ms": 600},
 }
 
 _GAZE_CLIPS = {
+    # Keep attention forward for important segments
     "BREAKING": {"clip": "GAZE_FORWARD", "dur_ms": 500},
     "EARTHQUAKE": {"clip": "GAZE_FORWARD", "dur_ms": 700},
     "TYPHOON": {"clip": "GAZE_FORWARD", "dur_ms": 700},
+    "ALERT": {"clip": "GAZE_FORWARD", "dur_ms": 600},
+    "ADVISORY": {"clip": "GAZE_FORWARD", "dur_ms": 600},
+    # General weather terms keep steady gaze
+    "WEATHER": {"clip": "GAZE_FORWARD", "dur_ms": 500},
+    "RAIN": {"clip": "GAZE_FORWARD", "dur_ms": 500},
+    "SNOW": {"clip": "GAZE_FORWARD", "dur_ms": 500},
+    "SUNNY": {"clip": "GAZE_FORWARD", "dur_ms": 500},
+    "HEAVY_RAIN": {"clip": "GAZE_FORWARD", "dur_ms": 600},
+    "HEAVY_SNOW": {"clip": "GAZE_FORWARD", "dur_ms": 600},
 }
 
 

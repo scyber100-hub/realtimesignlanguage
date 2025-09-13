@@ -6,7 +6,7 @@ from packages.nlp_norm.normalize import parse_sino_korean_number
 
 # 매우 단순한 한국어 토크나이저(공백/기호 기준). 실제 서비스는 형태소 분석기 사용 권장.
 def tokenize_ko(text: str) -> List[str]:
-    seps = ",.!?;:()[]{}\"'\n\t"
+    seps = ".!?;:()[]{}\"'\n\t"
     for s in seps:
         text = text.replace(s, " ")
     # 숫자 구분 쉼표 제거: 1,234 → 1234
