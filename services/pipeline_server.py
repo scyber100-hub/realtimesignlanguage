@@ -103,6 +103,7 @@ class SessionState(BaseModel):
     last_update_ms: int = 0
     meta: Dict[str, Any] = {}
     last_text: str = ""
+    last_replace_broadcast_ms: int = 0
 
 sessions: Dict[str, SessionState] = {}
 
@@ -166,6 +167,9 @@ async def get_config(_: None = Depends(require_api_key)):
         "latency_p90_warn_ms": settings.latency_p90_warn_ms,
         "replace_ratio_warn": settings.replace_ratio_warn,
         "rate_limit_ratio_warn": settings.rate_limit_ratio_warn,
+        "replace_min_events": getattr(settings, 'replace_min_events', None),
+        "replace_min_ms": getattr(settings, 'replace_min_ms', None),
+        "replace_min_interval_ms": getattr(settings, 'replace_min_interval_ms', None),
     }
 
 
@@ -175,6 +179,9 @@ class ConfigUpdate(BaseModel):
     latency_p90_warn_ms: Optional[int] = None
     replace_ratio_warn: Optional[float] = None
     rate_limit_ratio_warn: Optional[float] = None
+    replace_min_events: Optional[int] = None
+    replace_min_ms: Optional[int] = None
+    replace_min_interval_ms: Optional[int] = None
 
 
 @app.post("/config/update")
@@ -217,6 +224,33 @@ async def update_config(req: ConfigUpdate, _: None = Depends(require_api_key)):
                 raise ValueError("rate_limit_ratio_warn must be in [0,1]")
             settings.rate_limit_ratio_warn = v
             changed["rate_limit_ratio_warn"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.replace_min_events is not None:
+        try:
+            v = int(req.replace_min_events)
+            if v < 0:
+                raise ValueError("replace_min_events must be >=0")
+            settings.replace_min_events = v
+            changed["replace_min_events"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.replace_min_ms is not None:
+        try:
+            v = int(req.replace_min_ms)
+            if v < 0:
+                raise ValueError("replace_min_ms must be >=0")
+            settings.replace_min_ms = v
+            changed["replace_min_ms"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.replace_min_interval_ms is not None:
+        try:
+            v = int(req.replace_min_interval_ms)
+            if v < 0:
+                raise ValueError("replace_min_interval_ms must be >=0")
+            settings.replace_min_interval_ms = v
+            changed["replace_min_interval_ms"] = v
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "changed": changed}
@@ -459,16 +493,27 @@ async def _process_stream_in(payload: StreamIn):
             stats.on_latency(lat)
         TIMELINE_BC.inc()
     else:
-        out = {"type": "timeline.replace", "session_id": payload.session_id, "from_t_ms": from_t, "data": {"id": st.base_id, "events": new_timeline["events"][start_idx:end_idx]}}
-        await manager.broadcast_json(out)
-        stats.on_timeline()
-        _log_timeline("timeline.replace", out)
-        if payload.origin_ts:
-            lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
-            INGEST_TO_BC_MS.observe(lat)
-            stats.on_latency(lat)
-        TIMELINE_BC.inc()
-        stats.on_replace()
+        # replace window quality checks
+        ev_delta = max(0, end_idx - start_idx)
+        win_ms = _slice_window_ms(new_timeline["events"], start_idx, end_idx)
+        now_ms = int(time.time() * 1000)
+        min_ev = getattr(settings, 'replace_min_events', 0) or 0
+        min_ms = getattr(settings, 'replace_min_ms', 0) or 0
+        min_it = getattr(settings, 'replace_min_interval_ms', 0) or 0
+        too_small = (ev_delta < min_ev) or (win_ms < min_ms)
+        too_soon = (min_it > 0 and (now_ms - (st.last_replace_broadcast_ms or 0) < min_it))
+        if not too_small and not too_soon and ev_delta > 0:
+            out = {"type": "timeline.replace", "session_id": payload.session_id, "from_t_ms": from_t, "data": {"id": st.base_id, "events": new_timeline["events"][start_idx:end_idx]}}
+            await manager.broadcast_json(out)
+            stats.on_timeline()
+            _log_timeline("timeline.replace", out)
+            if payload.origin_ts:
+                lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+                INGEST_TO_BC_MS.observe(lat)
+                stats.on_latency(lat)
+            TIMELINE_BC.inc()
+            stats.on_replace()
+            st.last_replace_broadcast_ms = now_ms
     st.events = new_timeline["events"]
     st.last_text = payload.text
     return {"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final"}
@@ -529,6 +574,17 @@ def _diff_window(old: List[str], new: List[str]) -> Tuple[int, int]:
     if end < start:
         end = start
     return start, end
+
+
+def _slice_window_ms(evts: List[Dict[str, Any]], start_idx: int, end_idx_ex: int) -> int:
+    try:
+        if end_idx_ex <= start_idx or start_idx < 0 or end_idx_ex > len(evts):
+            return 0
+        first = evts[start_idx]
+        last = evts[end_idx_ex-1]
+        return int((last.get("t_ms", 0) + last.get("dur_ms", 0)) - first.get("t_ms", 0))
+    except Exception:
+        return 0
 
 
 @app.websocket("/ws/ingest")
