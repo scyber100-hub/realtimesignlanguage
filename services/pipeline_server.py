@@ -99,6 +99,9 @@ class SessionState(BaseModel):
     meta: Dict[str, Any] = {}
     last_text: str = ""
     lat_ms: List[int] = []
+    ingest_partial: int = 0
+    ingest_final: int = 0
+    rate_limited_count: int = 0
 
 sessions: Dict[str, SessionState] = {}
 
@@ -419,6 +422,10 @@ async def _process_stream_in(payload: StreamIn):
     st.recent_ms = [t for t in st.recent_ms if now_ms - t <= window_ms]
     if len(st.recent_ms) >= max(1, settings.max_ingest_rps):
         RATE_LIMITED.inc()
+        try:
+            st.rate_limited_count += 1
+        except Exception:
+            pass
         stats.on_rate_limited()
         return {"ok": False, "rate_limited": True, "session_id": payload.session_id}
     st.recent_ms.append(now_ms)
@@ -442,6 +449,13 @@ async def _process_stream_in(payload: StreamIn):
     if payload.type == "partial" and _norm_partial(payload.text) == _norm_partial(st.last_text or ""):
         return {"ok": True, "session_id": payload.session_id, "is_final": False}
     st.text = payload.text
+    try:
+        if payload.type == "partial":
+            st.ingest_partial += 1
+        elif payload.type == "final":
+            st.ingest_final += 1
+    except Exception:
+        pass
     tokens = tokenize_ko(st.text)
     glosses = ko_to_gloss(tokens)
     new_timeline = compile_glosses(glosses, start_ms=st.start_ms, gap_ms=st.gap_ms, include_aux_channels=settings.include_aux_channels)
@@ -594,6 +608,13 @@ async def ws_ingest(ws: WebSocket):
 
             # ?꾩껜 ?띿뒪??湲곗??쇰줈 ?⑥닚 利앸텇 泥섎━
             st.text = payload.text
+            try:
+                if payload.type == "partial":
+                    st.ingest_partial += 1
+                elif payload.type == "final":
+                    st.ingest_final += 1
+            except Exception:
+                pass
             tokens = tokenize_ko(st.text)
             glosses = ko_to_gloss(tokens)
             new_timeline = compile_glosses(glosses, start_ms=st.start_ms, gap_ms=st.gap_ms, include_aux_channels=settings.include_aux_channels)
@@ -899,6 +920,7 @@ async def sessions_full(_: None = Depends(require_api_key)):
             "last_text_preview": preview,
             "replace_ratio_recent": rep_ratio,
             "latency_p90_ms": p90,
+            "rate_limit_ratio_recent": (round(((getattr(st,'rate_limited_count',0) or 0) / max(1, ((getattr(st,'ingest_partial',0) or 0) + (getattr(st,'ingest_final',0) or 0)))), 3)),
         })
     return {"count": len(items), "items": items}
 
