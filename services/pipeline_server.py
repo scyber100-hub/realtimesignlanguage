@@ -597,6 +597,38 @@ async def ws_ingest(ws: WebSocket):
     await ws.accept()
     try:
         while True:
+            start_t = time.perf_counter()
+            msg = await ws.receive_json()
+            try:
+                payload = StreamIn(**msg)
+            except Exception:
+                await ws.send_json({"ok": False, "error": "invalid message"})
+                continue
+            # delegate to shared processor (includes rate-limit + replace quality checks)
+            res = await _process_stream_in(payload)
+            proc_ms = int((time.perf_counter() - start_t) * 1000)
+            res = dict(res)
+            res["proc_ms"] = proc_ms
+            await ws.send_json(res)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/ingest")
+async def ws_ingest(ws: WebSocket):
+    # optional API key via query param 'key'
+    key = ws.query_params.get("key")
+    if settings.api_key and key != settings.api_key:
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    try:
+        while True:
             msg = await ws.receive_json()
             start = time.perf_counter()
             payload = StreamIn(**msg)
