@@ -328,6 +328,34 @@ async def events_summary(n: int = 100, session_id: Optional[str] = None, _: None
     return {"total": total, "replaces": replaces, "ratio": round(ratio, 3)}
 
 
+@app.get("/events/summary/by_session")
+async def events_summary_by_session(n: int = 100, _: None = Depends(require_api_key)):
+    try:
+        n = max(1, min(int(n), RECENT_EVENTS_MAX))
+    except Exception:
+        n = 100
+    if isinstance(RECENT_EVENTS, list):
+        items = RECENT_EVENTS[-n:]
+    else:
+        items = list(RECENT_EVENTS)[-n:]
+    agg: Dict[str, Dict[str, Any]] = {}
+    for x in items:
+        sid = x.get('session_id') or 'unknown'
+        a = agg.get(sid) or {"session_id": sid, "total": 0, "replaces": 0}
+        a["total"] += 1
+        if x.get('type') == 'timeline.replace':
+            a["replaces"] += 1
+        agg[sid] = a
+    out = []
+    for sid, a in agg.items():
+        total = a.get("total") or 0
+        rep = a.get("replaces") or 0
+        ratio = round((rep/total), 3) if total else 0
+        out.append({"session_id": sid, "total": total, "replaces": rep, "ratio": ratio})
+    out.sort(key=lambda x: x.get('session_id') or '')
+    return {"count": len(out), "items": out}
+
+
 @app.post("/events/clear")
 async def events_clear(_: None = Depends(require_api_key)):
     try:

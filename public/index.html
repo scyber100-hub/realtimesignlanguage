@@ -353,6 +353,35 @@
     // auto-connect
     connect();
 
+    // initialize threshold legend from /config once on load
+    (async function initConfigLegend(){
+      try {
+        const headers = {};
+        const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
+        const res = await fetch('/config', { headers });
+        const data = await res.json();
+        if (typeof data.latency_p90_warn_ms !== 'undefined') document.getElementById('thLat').textContent = data.latency_p90_warn_ms;
+        if (typeof data.replace_ratio_warn !== 'undefined') document.getElementById('thRep').textContent = data.replace_ratio_warn;
+        if (typeof data.rate_limit_ratio_warn !== 'undefined') document.getElementById('thRL').textContent = data.rate_limit_ratio_warn;
+      } catch {}
+    })();
+
+    // keep legend in sync after threshold update button is pressed
+    (function bindThreshLegendSync(){
+      const btn = document.getElementById('thUpdate');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        setTimeout(() => {
+          const lat = parseInt(document.getElementById('latWarn')?.value||'');
+          const rep = parseFloat(document.getElementById('repWarn')?.value||'');
+          const rl  = parseFloat(document.getElementById('rlWarn')?.value||'');
+          if (!isNaN(lat)) document.getElementById('thLat').textContent = lat;
+          if (!isNaN(rep)) document.getElementById('thRep').textContent = rep;
+          if (!isNaN(rl))  document.getElementById('thRL').textContent = rl;
+        }, 150);
+      });
+    })();
+
     // Config
     document.getElementById('cfgBtn').onclick = async () => {
       const headers = {};
