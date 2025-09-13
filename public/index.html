@@ -91,8 +91,8 @@
     <label><input type="checkbox" id="autoSess"/> auto-refresh</label>
     <input id="sessInt" type="number" value="5" min="1" style="width:60px;"/>s
   </div>
-  <table id="sessTable" border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px; min-width:760px;">
-    <thead><tr><th>session</th><th>events</th><th>text_len</th><th>last_update_ms</th><th>lat_p90</th><th>rep_recent</th><th>last_text</th><th>meta</th></tr></thead>
+  <table id="sessTable" border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px; min-width:880px;">
+    <thead><tr><th>session</th><th>events</th><th>text_len</th><th>last_update_ms</th><th>lat_p90</th><th>rep_recent</th><th>rl_ratio</th><th>last_text</th><th>meta</th></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -416,7 +416,21 @@
         const lastTxt = r.last_text_preview || '';
         const p90 = (typeof r.latency_p90_ms !== 'undefined' && r.latency_p90_ms !== null) ? r.latency_p90_ms : '';
         const rep = (typeof r.replace_ratio_recent !== 'undefined' && r.replace_ratio_recent !== null) ? r.replace_ratio_recent : '';
-        tr.innerHTML = `<td>${r.session_id}</td><td>${r.events}</td><td>${r.text_len}</td><td>${r.last_update_ms||''}</td><td>${p90}</td><td>${rep}</td><td>${lastTxt}</td><td>${meta}</td>`;
+        const rl  = (typeof r.rate_limit_ratio_recent !== 'undefined' && r.rate_limit_ratio_recent !== null) ? r.rate_limit_ratio_recent : '';
+        const p90Bad = (typeof p90 === 'number') && (p90 > (cfg.latency_p90_warn_ms||1200));
+        const repBad = (typeof rep === 'number') && (rep > (cfg.replace_ratio_warn||0.5));
+        const rlBad  = (typeof rl === 'number')  && (rl  > (cfg.rate_limit_ratio_warn||0.1));
+        const bad = '#ff9aa2', good = '#c2f0c2';
+        tr.innerHTML = `
+          <td>${r.session_id}</td>
+          <td>${r.events}</td>
+          <td>${r.text_len}</td>
+          <td>${r.last_update_ms||''}</td>
+          <td style="background:${p90Bad?bad:good}">${p90}</td>
+          <td style="background:${repBad?bad:good}">${rep}</td>
+          <td style="background:${rlBad?bad:good}">${rl}</td>
+          <td>${lastTxt}</td>
+          <td>${meta}</td>`;
         tb.appendChild(tr);
       });
       log('GET /sessions_full => ' + JSON.stringify(data));

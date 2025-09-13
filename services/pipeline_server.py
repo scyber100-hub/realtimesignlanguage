@@ -1079,7 +1079,7 @@ async def ws_asr(ws: WebSocket):
                     # best-effort local transcription
                     text = streamer.transcribe_pcm16le(bytes(ring))
                     if text:
-                        res = await _process_stream_in(StreamIn(type="partial", session_id=session_id, text=text))
+                        res = await _process_stream_in(StreamIn(type="partial", session_id=session_id, text=text, origin_ts=int(time.time()*1000)))
                         await ws.send_json(res)
                         ring.clear()
     except WebSocketDisconnect:
