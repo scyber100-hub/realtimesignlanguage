@@ -1,4 +1,4 @@
-AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
+﻿AI 기반 실시간 방송 수어 통번역 플랫폼 (KOR→KSL)
 
 목표
 - 방향: 한국어 → 한국수어(KSL)
@@ -135,3 +135,40 @@ GitHub 푸시
   2) `git remote add origin https://github.com/scyber100-hub/realtimesignlanguage.git`
   3) `git push -u origin HEAD`
   - 토큰/권한 필요 시 GitHub PAT를 사용하세요.
+
+업데이트(경보/튜닝/대시보드)
+- 서버
+  - GET /stats/alerts: p90 지연/교체 비율/레이트리밋 비율 임계치 초과시 경보 반환
+  - 교체 품질 튜닝 환경변수: REPLACE_MIN_EVENTS(기본2), REPLACE_MIN_MS(기본300), REPLACE_MIN_INTERVAL_MS(기본150)
+  - POST /config/update: replace_min_events, replace_min_ms, replace_min_interval_ms 실시간 조정
+- 대시보드(public/index.html)
+  - 상단 경보 배지(latency/replace/rate-limit)
+  - Alerts 패널: 수동/자동 새로고침, 타입 필터, JSON 내보내기
+
+## API Table (summary)
+
+| Method | Path                         | Auth        | Description |
+|--------|------------------------------|-------------|-------------|
+| GET    | `/healthz`                   | none        | Health check |
+| GET    | `/metrics`                   | none (if enabled) | Prometheus metrics |
+| GET    | `/stats`                     | API key     | Runtime stats snapshot (includes warn flags) |
+| GET    | `/stats/alerts`              | API key     | Current alerts (derived from snapshot) |
+| GET    | `/stats/alerts/history`      | API key     | Recent alerts history (server-side) |
+| POST   | `/stats/alerts/clear`        | API key     | Clear alerts history |
+| GET    | `/config`                    | API key     | Current config (thresholds, tuning) |
+| POST   | `/config/update`             | API key     | Update config (thresholds, tuning) |
+| POST   | `/text2gloss`                | none        | Convert text → gloss list |
+| POST   | `/gloss2timeline`            | none        | Compile glosses → SignTimeline |
+| POST   | `/ingest_text`               | API key     | Compile + broadcast timeline |
+| WS     | `/ws/timeline`               | none        | Subscribe to timeline/stats push |
+| WS     | `/ws/ingest`                 | API key via query | Incremental ingest (`partial`/`final`) → `timeline`/`timeline.replace` |
+| GET    | `/timeline/last`             | API key     | Last broadcast payload (for reload) |
+| GET    | `/events/recent`             | API key     | Recent events log (timeline/replace) |
+| GET    | `/events/summary`            | API key     | Summary over recent events (totals/ratio) |
+| GET    | `/events/summary/by_session` | API key     | Summary grouped by session (totals/ratio) |
+| GET    | `/lexicon`                   | API key     | Overlay lexicon (size/items) |
+| POST   | `/lexicon/update`            | API key     | Update overlay lexicon items |
+| POST   | `/lexicon/upload`            | API key     | Upload overlay lexicon JSON |
+| POST   | `/lexicon/snapshot`          | API key     | Save current overlay to versions dir |
+| GET    | `/lexicon/versions`          | API key     | List overlay snapshots |
+| POST   | `/lexicon/rollback`          | API key     | Roll back to a named snapshot |

@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8"/>
@@ -20,6 +20,11 @@
     <input id="apikey" type="text" placeholder="x-api-key (optional)" style="width:260px;"/>
     <button id="cfgBtn">GET /config</button>
     <span id="cfgOut" class="badge"></span>
+  </div>
+  <div class="row" id="alertBadges" style="gap:8px;">
+    <span class="badge" id="badgeLat" title="Latency p90 alert">⚡ latency: ok</span>
+    <span class="badge" id="badgeRep" title="Replace ratio alert">♻️ replace: ok</span>
+    <span class="badge" id="badgeRL" title="Rate limit ratio alert">🚥 rate-limit: ok</span>
   </div>
   <div class="row" style="gap:10px; align-items: center;">
     <label><input type="checkbox" id="auxToggle"/> include_aux_channels</label>
@@ -64,6 +69,18 @@
   </div>
   <pre id="log"></pre>
   <canvas id="timeline" width="900" height="120" style="border:1px solid #333; margin-top:10px;"></canvas>
+
+  <h2 style="margin-top:16px; font-size:16px;">Alerts</h2>
+  <div id="alertsPanel" style="border:1px solid #333; padding:8px; border-radius:6px; max-width:900px;">
+    <div class="row" style="gap:10px; align-items:center;">
+      <button id="alertsRefresh">GET /stats/alerts/history</button>
+      <label><input type="checkbox" id="alertsAuto"/> auto-refresh</label>
+      <input id="alertsInt" type="number" value="7" min="2" style="width:60px;"/> sec
+      <label>count <input id="alertsN" type="number" value="30" min="1" max="200" style="width:70px;"/></label>
+      <span class="badge" id="alertsCount">0</span>
+    </div>
+    <ul id="alertsList" style="list-style:none; padding-left:10px; margin:6px 0 0 0;"></ul>
+  </div>
 
   <h2 style="margin-top:16px; font-size:16px;">Lexicon</h2>
   <div class="row">
@@ -251,14 +268,16 @@
             document.getElementById('sess_count').textContent = s.session_count ?? 0;
             if (document.getElementById('rl_total')) document.getElementById('rl_total').textContent = s.ingest_rate_limited_total ?? 0;
             document.getElementById('ws_clients').textContent = s.ws_clients ?? 0;
-            if (s.latency_ms){
-              document.getElementById('p50').textContent = s.latency_ms.p50 ?? '-';
-              document.getElementById('p90').textContent = s.latency_ms.p90 ?? '-';
-              document.getElementById('p99').textContent = s.latency_ms.p99 ?? '-';
-              drawHist(s.latency_ms);
-              drawSpark(s.latency_ms.recent);
-            }
-          } else if (data.type === 'timeline' && data.data) {
+          if (s.latency_ms){
+            document.getElementById('p50').textContent = s.latency_ms.p50 ?? '-';
+            document.getElementById('p90').textContent = s.latency_ms.p90 ?? '-';
+            document.getElementById('p99').textContent = s.latency_ms.p99 ?? '-';
+            drawHist(s.latency_ms);
+            drawSpark(s.latency_ms.recent);
+          }
+          // update alert badges
+          updateBadgesFromStats(s);
+        } else if (data.type === 'timeline' && data.data) {
             drawTimeline(data.data.events);
             log(JSON.stringify(data));
           } else if (data.type === 'timeline.replace' && data.data) {
@@ -284,6 +303,70 @@
       return h;
     };
 
+    // ----- Alerts (badges + panel) -----
+    const badgeLat = document.getElementById('badgeLat');
+    const badgeRep = document.getElementById('badgeRep');
+    const badgeRL  = document.getElementById('badgeRL');
+    let lastWarn = { lat: false, rep: false, rl: false };
+    const recentAlerts = [];
+    const maxAlertItems = 30;
+    function pushAlert(a){
+      recentAlerts.push(a);
+      while (recentAlerts.length > maxAlertItems) recentAlerts.shift();
+      renderAlerts();
+    }
+    function renderAlerts(){
+      const ul = document.getElementById('alertsList');
+      if (!ul) return;
+      ul.innerHTML = '';
+      const fmt = (ms)=>{ try { return new Date(ms).toLocaleTimeString(); } catch { return String(ms); } };
+      const filterEl = document.getElementById('alertsFilter');
+      const filter = filterEl ? filterEl.value : 'all';
+      (filter==='all' ? recentAlerts.slice().reverse() : recentAlerts.slice().reverse().filter(a => a.type === filter)).forEach(a => {
+        const li = document.createElement('li');
+        const color = a.type === 'latency_p90' ? '#ff6b6b' : (a.type === 'replace_ratio' ? '#ff66cc' : '#ff9933');
+        li.innerHTML = `<span class="badge" style="background:${color}; color:#111;">${a.type}</span> <b>${(a.value ?? a.p90) ?? ''}</b> (th=${a.threshold ?? ''}) <span style="color:#999">@ ${fmt(a.ts)}</span>`;
+        ul.appendChild(li);
+      });
+      const ac = document.getElementById('alertsCount'); if (ac) ac.textContent = String(recentAlerts.length);
+    }
+    function setBadge(el, on, text){ if (!el) return; el.textContent = text; el.style.background = on ? '#ffb3b3' : '#e7f7e7'; el.style.color = '#111'; }
+    function updateBadgesFromStats(s){
+      const p90 = s?.latency_ms?.p90 ?? null;
+      const rep = s?.timeline_replace_ratio ?? 0;
+      const rlr = s?.rate_limit_ratio ?? 0;
+      const warnLat = !!s?.warn_latency_p90;
+      const warnRep = !!s?.warn_replace_ratio;
+      const warnRL  = !!s?.warn_rate_limit_ratio;
+      setBadge(badgeLat, warnLat, `latency: ${p90 ?? '-'}`);
+      setBadge(badgeRep, warnRep, `replace: ${rep}`);
+      setBadge(badgeRL,  warnRL,  `rate-limit: ${rlr}`);
+      const now = Date.now();
+      if (warnLat && !lastWarn.lat) pushAlert({ type:'latency_p90', p90, threshold: (window.cfg?.latency_p90_warn_ms), ts: now });
+      if (warnRep && !lastWarn.rep) pushAlert({ type:'replace_ratio', value: rep, threshold: (window.cfg?.replace_ratio_warn), ts: now });
+      if (warnRL  && !lastWarn.rl ) pushAlert({ type:'rate_limit_ratio', value: rlr, threshold: (window.cfg?.rate_limit_ratio_warn), ts: now });
+      lastWarn = { lat: warnLat, rep: warnRep, rl: warnRL };
+    }
+    async function fetchAlerts(){
+      try {
+        const headers = {};
+        const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
+        const res = await fetch('/stats/alerts/history?n=30', { headers });
+        const data = await res.json();
+        recentAlerts.length = 0;
+        (data.alerts||[]).forEach(a => { recentAlerts.push(a); });
+        renderAlerts();
+      } catch {}
+    }
+    const btnAR = document.getElementById('alertsRefresh'); if (btnAR) btnAR.onclick = fetchAlerts;
+    let alertsTimer = null;
+    const cbAuto = document.getElementById('alertsAuto'); if (cbAuto) cbAuto.onchange = (e)=>{
+      if (e.target.checked) {
+        const s = Math.max(2, parseInt(document.getElementById('alertsInt').value||'7'));
+        alertsTimer = setInterval(fetchAlerts, s*1000);
+      } else { if (alertsTimer) { clearInterval(alertsTimer); alertsTimer = null; } }
+    };
+
     document.getElementById('send').onclick = async () => {
       const text = document.getElementById('text').value || '안녕하세요 한국 날씨';
       const res = await fetch('/ingest_text', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ text })});
@@ -293,6 +376,35 @@
 
     // auto-connect
     connect();
+
+    // initialize threshold legend from /config once on load
+    (async function initConfigLegend(){
+      try {
+        const headers = {};
+        const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
+        const res = await fetch('/config', { headers });
+        const data = await res.json();
+        if (typeof data.latency_p90_warn_ms !== 'undefined') document.getElementById('thLat').textContent = data.latency_p90_warn_ms;
+        if (typeof data.replace_ratio_warn !== 'undefined') document.getElementById('thRep').textContent = data.replace_ratio_warn;
+        if (typeof data.rate_limit_ratio_warn !== 'undefined') document.getElementById('thRL').textContent = data.rate_limit_ratio_warn;
+      } catch {}
+    })();
+
+    // keep legend in sync after threshold update button is pressed
+    (function bindThreshLegendSync(){
+      const btn = document.getElementById('thUpdate');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        setTimeout(() => {
+          const lat = parseInt(document.getElementById('latWarn')?.value||'');
+          const rep = parseFloat(document.getElementById('repWarn')?.value||'');
+          const rl  = parseFloat(document.getElementById('rlWarn')?.value||'');
+          if (!isNaN(lat)) document.getElementById('thLat').textContent = lat;
+          if (!isNaN(rep)) document.getElementById('thRep').textContent = rep;
+          if (!isNaN(rl))  document.getElementById('thRL').textContent = rl;
+        }, 150);
+      });
+    })();
 
     // Config
     document.getElementById('cfgBtn').onclick = async () => {
@@ -450,6 +562,25 @@
       log('POST /events/clear => ' + JSON.stringify(data));
     };
 
+    // Alerts panel handlers
+    const btnAR = document.getElementById('alertsRefresh'); if (btnAR) btnAR.onclick = fetchAlerts;
+    let alertsTimer = null;
+    const cbAuto = document.getElementById('alertsAuto'); if (cbAuto) cbAuto.onchange = (e)=>{
+      if (e.target.checked) {
+        const s = Math.max(2, parseInt(document.getElementById('alertsInt').value||'7'));
+        alertsTimer = setInterval(fetchAlerts, s*1000);
+      } else { if (alertsTimer) { clearInterval(alertsTimer); alertsTimer = null; } }
+    };
+    const selAF = document.getElementById('alertsFilter'); if (selAF) selAF.onchange = renderAlerts;
+    const btnAC = document.getElementById('alertsClear'); if (btnAC) btnAC.onclick = () => { recentAlerts.length = 0; renderAlerts(); };
+    const btnAX = document.getElementById('alertsExport'); if (btnAX) btnAX.onclick = () => {
+      const data = JSON.stringify(recentAlerts, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'alerts.json'; a.click();
+      URL.revokeObjectURL(url);
+    };
+
     // auto refresh toggles
     let sessTimer = null, evTimer = null;
     document.getElementById('autoSess').onchange = (e) => {
@@ -468,3 +599,5 @@
 </body>
 <span></span>
 </html>
+
+

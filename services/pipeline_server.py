@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Tuple
+﻿from typing import List, Optional, Dict, Any, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,6 +87,11 @@ app.add_middleware(
 
 manager = ConnectionManager()
 
+# API key dependency used by protected endpoints
+def require_api_key(x_api_key: str | None = Header(default=None)):
+    if settings.api_key and x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="invalid api key")
+
 # 세션 상태: 증분 처리용(간단 버전)
 class SessionState(BaseModel):
     text: str = ""
@@ -98,6 +103,7 @@ class SessionState(BaseModel):
     last_update_ms: int = 0
     meta: Dict[str, Any] = {}
     last_text: str = ""
+    last_replace_broadcast_ms: int = 0
 
 sessions: Dict[str, SessionState] = {}
 
@@ -105,10 +111,10 @@ sessions: Dict[str, SessionState] = {}
 REQ_LAT = Histogram("pipeline_request_latency_seconds", "Latency of API processing", labelnames=("endpoint",))
 TIMELINE_BC = Counter("timeline_broadcast_total", "Number of timeline messages broadcast")
 INGEST_MSG = Counter("ingest_messages_total", "Number of ingest messages", labelnames=("type",))
-RATE_LIMITED = Counter("ingest_rate_limited_total", "Number of rate-limited ingest events")
 INGEST_TO_BC_MS = Histogram("ingest_to_broadcast_ms", "Latency from ingest message to timeline broadcast in ms")
 BROADCAST_ERR = Counter("timeline_broadcast_errors_total", "Number of websocket broadcast errors")
 WS_CLIENTS = Gauge("websocket_clients", "Number of connected websocket clients")
+RATE_LIMITED = Counter("ingest_rate_limited_total", "Number of ingest messages rate-limited")
 
 # Load timeline schema for validation
 _SCHEMA_PATH = Path("schemas/sign_timeline.schema.json")
@@ -143,6 +149,49 @@ async def get_stats(_: None = Depends(require_api_key)):
     return stats.snapshot()
 
 
+@app.get("/stats/alerts")
+async def get_stats_alerts(_: None = Depends(require_api_key)):
+    s = stats.snapshot()
+    alerts = []
+    if s.get("warn_latency_p90"):
+        alerts.append({"type": "latency_p90", "p90": s.get("latency_ms",{}).get("p90"), "threshold": get_settings().latency_p90_warn_ms})
+    if s.get("warn_replace_ratio"):
+        alerts.append({"type": "replace_ratio", "value": s.get("timeline_replace_ratio"), "threshold": get_settings().replace_ratio_warn})
+    if s.get("warn_rate_limit_ratio"):
+        alerts.append({"type": "rate_limit_ratio", "value": s.get("rate_limit_ratio"), "threshold": get_settings().rate_limit_ratio_warn})
+    return {"count": len(alerts), "alerts": alerts}
+
+
+@app.get("/stats/alerts/history")
+async def get_stats_alerts_history(n: int = 30, _: None = Depends(require_api_key)):
+    try:
+        n = max(1, min(int(n), 200))
+    except Exception:
+        n = 30
+    try:
+        from collections import deque
+        if hasattr(stats, '_alerts') and isinstance(stats._alerts, (list, tuple, deque)):
+            items = list(stats._alerts)[-n:]
+            return {"count": len(items), "alerts": items}
+    except Exception:
+        pass
+    return {"count": 0, "alerts": []}
+
+
+@app.post("/stats/alerts/clear")
+async def clear_stats_alerts(_: None = Depends(require_api_key)):
+    try:
+        if hasattr(stats, '_alerts') and isinstance(stats._alerts, list):
+            stats._alerts.clear()
+        else:
+            # deque
+            while getattr(stats, '_alerts', None) and len(stats._alerts):
+                stats._alerts.popleft()
+        return {"ok": True}
+    except Exception:
+        return {"ok": False}
+
+
 @app.get("/config")
 async def get_config(_: None = Depends(require_api_key)):
     return {
@@ -153,6 +202,9 @@ async def get_config(_: None = Depends(require_api_key)):
         "latency_p90_warn_ms": settings.latency_p90_warn_ms,
         "replace_ratio_warn": settings.replace_ratio_warn,
         "rate_limit_ratio_warn": settings.rate_limit_ratio_warn,
+        "replace_min_events": getattr(settings, 'replace_min_events', None),
+        "replace_min_ms": getattr(settings, 'replace_min_ms', None),
+        "replace_min_interval_ms": getattr(settings, 'replace_min_interval_ms', None),
     }
 
 
@@ -162,6 +214,9 @@ class ConfigUpdate(BaseModel):
     latency_p90_warn_ms: Optional[int] = None
     replace_ratio_warn: Optional[float] = None
     rate_limit_ratio_warn: Optional[float] = None
+    replace_min_events: Optional[int] = None
+    replace_min_ms: Optional[int] = None
+    replace_min_interval_ms: Optional[int] = None
 
 
 @app.post("/config/update")
@@ -204,6 +259,33 @@ async def update_config(req: ConfigUpdate, _: None = Depends(require_api_key)):
                 raise ValueError("rate_limit_ratio_warn must be in [0,1]")
             settings.rate_limit_ratio_warn = v
             changed["rate_limit_ratio_warn"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.replace_min_events is not None:
+        try:
+            v = int(req.replace_min_events)
+            if v < 0:
+                raise ValueError("replace_min_events must be >=0")
+            settings.replace_min_events = v
+            changed["replace_min_events"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.replace_min_ms is not None:
+        try:
+            v = int(req.replace_min_ms)
+            if v < 0:
+                raise ValueError("replace_min_ms must be >=0")
+            settings.replace_min_ms = v
+            changed["replace_min_ms"] = v
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if req.replace_min_interval_ms is not None:
+        try:
+            v = int(req.replace_min_interval_ms)
+            if v < 0:
+                raise ValueError("replace_min_interval_ms must be >=0")
+            settings.replace_min_interval_ms = v
+            changed["replace_min_interval_ms"] = v
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "changed": changed}
@@ -251,6 +333,34 @@ async def events_summary(n: int = 100, session_id: Optional[str] = None, _: None
     return {"total": total, "replaces": replaces, "ratio": round(ratio, 3)}
 
 
+@app.get("/events/summary/by_session")
+async def events_summary_by_session(n: int = 100, _: None = Depends(require_api_key)):
+    try:
+        n = max(1, min(int(n), RECENT_EVENTS_MAX))
+    except Exception:
+        n = 100
+    if isinstance(RECENT_EVENTS, list):
+        items = RECENT_EVENTS[-n:]
+    else:
+        items = list(RECENT_EVENTS)[-n:]
+    agg: Dict[str, Dict[str, Any]] = {}
+    for x in items:
+        sid = x.get('session_id') or 'unknown'
+        a = agg.get(sid) or {"session_id": sid, "total": 0, "replaces": 0}
+        a["total"] += 1
+        if x.get('type') == 'timeline.replace':
+            a["replaces"] += 1
+        agg[sid] = a
+    out = []
+    for sid, a in agg.items():
+        total = a.get("total") or 0
+        rep = a.get("replaces") or 0
+        ratio = round((rep/total), 3) if total else 0
+        out.append({"session_id": sid, "total": total, "replaces": rep, "ratio": ratio})
+    out.sort(key=lambda x: x.get('session_id') or '')
+    return {"count": len(out), "items": out}
+
+
 @app.post("/events/clear")
 async def events_clear(_: None = Depends(require_api_key)):
     try:
@@ -295,6 +405,10 @@ async def gloss2timeline(payload: GlossIn):
         jsonschema_validate(timeline, _TIMELINE_SCHEMA)
     return timeline
 
+<<<<<<< HEAD
+
+=======
+>>>>>>> origin/master
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 TIMELINE_LOG = LOG_DIR / "timeline.log"
@@ -456,16 +570,27 @@ async def _process_stream_in(payload: StreamIn):
             stats.on_latency(lat)
         TIMELINE_BC.inc()
     else:
-        out = {"type": "timeline.replace", "session_id": payload.session_id, "from_t_ms": from_t, "data": {"id": st.base_id, "events": new_timeline["events"][start_idx:end_idx]}}
-        await manager.broadcast_json(out)
-        stats.on_timeline()
-        _log_timeline("timeline.replace", out)
-        if payload.origin_ts:
-            lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
-            INGEST_TO_BC_MS.observe(lat)
-            stats.on_latency(lat)
-        TIMELINE_BC.inc()
-        stats.on_replace()
+        # replace window quality checks
+        ev_delta = max(0, end_idx - start_idx)
+        win_ms = _slice_window_ms(new_timeline["events"], start_idx, end_idx)
+        now_ms = int(time.time() * 1000)
+        min_ev = getattr(settings, 'replace_min_events', 0) or 0
+        min_ms = getattr(settings, 'replace_min_ms', 0) or 0
+        min_it = getattr(settings, 'replace_min_interval_ms', 0) or 0
+        too_small = (ev_delta < min_ev) or (win_ms < min_ms)
+        too_soon = (min_it > 0 and (now_ms - (st.last_replace_broadcast_ms or 0) < min_it))
+        if not too_small and not too_soon and ev_delta > 0:
+            out = {"type": "timeline.replace", "session_id": payload.session_id, "from_t_ms": from_t, "data": {"id": st.base_id, "events": new_timeline["events"][start_idx:end_idx]}}
+            await manager.broadcast_json(out)
+            stats.on_timeline()
+            _log_timeline("timeline.replace", out)
+            if payload.origin_ts:
+                lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+                INGEST_TO_BC_MS.observe(lat)
+                stats.on_latency(lat)
+            TIMELINE_BC.inc()
+            stats.on_replace()
+            st.last_replace_broadcast_ms = now_ms
     st.events = new_timeline["events"]
     st.last_text = payload.text
     return {"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final"}
@@ -528,6 +653,49 @@ def _diff_window(old: List[str], new: List[str]) -> Tuple[int, int]:
     return start, end
 
 
+def _slice_window_ms(evts: List[Dict[str, Any]], start_idx: int, end_idx_ex: int) -> int:
+    try:
+        if end_idx_ex <= start_idx or start_idx < 0 or end_idx_ex > len(evts):
+            return 0
+        first = evts[start_idx]
+        last = evts[end_idx_ex-1]
+        return int((last.get("t_ms", 0) + last.get("dur_ms", 0)) - first.get("t_ms", 0))
+    except Exception:
+        return 0
+
+
+@app.websocket("/ws/ingest")
+async def ws_ingest(ws: WebSocket):
+    # optional API key via query param 'key'
+    key = ws.query_params.get("key")
+    if settings.api_key and key != settings.api_key:
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    try:
+        while True:
+            start_t = time.perf_counter()
+            msg = await ws.receive_json()
+            try:
+                payload = StreamIn(**msg)
+            except Exception:
+                await ws.send_json({"ok": False, "error": "invalid message"})
+                continue
+            # delegate to shared processor (includes rate-limit + replace quality checks)
+            res = await _process_stream_in(payload)
+            proc_ms = int((time.perf_counter() - start_t) * 1000)
+            res = dict(res)
+            res["proc_ms"] = proc_ms
+            await ws.send_json(res)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
 @app.websocket("/ws/ingest")
 async def ws_ingest(ws: WebSocket):
     # optional API key via query param 'key'
@@ -540,6 +708,7 @@ async def ws_ingest(ws: WebSocket):
         while True:
             start = time.perf_counter()
             msg = await ws.receive_json()
+            start = time.perf_counter()
             payload = StreamIn(**msg)
             INGEST_MSG.labels(payload.type).inc()
             stats.on_ingest(payload.type)
@@ -693,17 +862,28 @@ async def lexicon_get(_: None = Depends(require_api_key)):
 @app.middleware("http")
 async def log_requests(request, call_next):
     start = time.perf_counter()
+    response = await call_next(request)
+    dur = (time.perf_counter() - start) * 1000.0
     try:
+<<<<<<< HEAD
+        logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
+    except Exception:
+        pass
+    return response
+=======
         response = await call_next(request)
         return response
     finally:
         dur = (time.perf_counter() - start) * 1000.0
         logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
+>>>>>>> origin/master
 
 # Lightweight runtime stats (for dashboard)
 class Stats:
     def __init__(self):
         from collections import deque
+        from services.config import get_settings as _gs
+        _st = _gs()
         self.timeline_total = 0
         self.replace_total = 0
         self.rate_limited_total = 0
@@ -713,6 +893,9 @@ class Stats:
         self._ingest_ts = deque(maxlen=5000)
         self.last_ingest_to_bc_ms: int | None = None
         self._lat_ms = deque(maxlen=5000)
+        # Alerts history and last state
+        self._alerts = deque(maxlen=max(1, int(getattr(_st, 'alerts_max_items', 500) or 500)))
+        self._warn_last = {"latency_p90": False, "replace_ratio": False, "rate_limit_ratio": False}
 
     def on_timeline(self):
         from time import time as now
@@ -773,7 +956,7 @@ class Stats:
             hist = {"buckets": buckets, "counts": counts}
             # tail (last 30)
             recent = lats[-30:]
-        return {
+        out = {
             "timeline_broadcast_total": self.timeline_total,
             "timeline_rate_per_sec_1m": round(timeline_rate, 3),
             "timeline_replace_total": self.replace_total,
@@ -788,6 +971,31 @@ class Stats:
             "ws_clients": len(manager.active) if hasattr(manager, 'active') else None,
             "rate_limit_ratio": (round(self.rate_limited_total / (self.ingest_partial + self.ingest_final), 3) if (self.ingest_partial + self.ingest_final) else 0),
         }
+        # compute warn flags using current settings
+        try:
+            from services.config import get_settings as _gs
+            _st = _gs()
+            out["warn_latency_p90"] = (out["latency_ms"]["p90"] is not None) and (out["latency_ms"]["p90"] > _st.latency_p90_warn_ms)
+            out["warn_replace_ratio"] = (out["timeline_replace_ratio"] > _st.replace_ratio_warn)
+            out["warn_rate_limit_ratio"] = (out["rate_limit_ratio"] > _st.rate_limit_ratio_warn)
+            # push alerts on rising edge
+            now = int(__import__('time').time() * 1000)
+            if out["warn_latency_p90"] and not self._warn_last.get("latency_p90"):
+                self._alerts.append({"ts": now, "type": "latency_p90", "p90": out["latency_ms"]["p90"], "threshold": _st.latency_p90_warn_ms})
+            if out["warn_replace_ratio"] and not self._warn_last.get("replace_ratio"):
+                self._alerts.append({"ts": now, "type": "replace_ratio", "value": out["timeline_replace_ratio"], "threshold": _st.replace_ratio_warn})
+            if out["warn_rate_limit_ratio"] and not self._warn_last.get("rate_limit_ratio"):
+                self._alerts.append({"ts": now, "type": "rate_limit_ratio", "value": out["rate_limit_ratio"], "threshold": _st.rate_limit_ratio_warn})
+            self._warn_last = {
+                "latency_p90": bool(out["warn_latency_p90"]),
+                "replace_ratio": bool(out["warn_replace_ratio"]),
+                "rate_limit_ratio": bool(out["warn_rate_limit_ratio"]),
+            }
+        except Exception:
+            out["warn_latency_p90"] = False
+            out["warn_replace_ratio"] = False
+            out["warn_rate_limit_ratio"] = False
+        return out
 
 
 stats = Stats()
@@ -832,7 +1040,7 @@ async def sessions_full(_: None = Depends(require_api_key)):
         preview = ''
         try:
             txt = getattr(st, 'last_text', '') or ''
-            preview = (txt[:40] + '…') if len(txt) > 40 else txt
+            preview = (txt[:40] + '...') if len(txt) > 40 else txt
         except Exception:
             preview = ''
         # recent replace ratio for this session from RECENT_EVENTS
@@ -858,7 +1066,6 @@ async def sessions_full(_: None = Depends(require_api_key)):
             "replace_ratio_recent": rep_ratio,
         })
     return {"count": len(items), "items": items}
-
 
 @app.post("/lexicon/upload")
 async def lexicon_upload(file: UploadFile = File(...), _: None = Depends(require_api_key)):
