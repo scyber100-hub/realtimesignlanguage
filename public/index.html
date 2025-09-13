@@ -72,9 +72,10 @@
   <h2 style="margin-top:16px; font-size:16px;">Alerts</h2>
   <div id="alertsPanel" style="border:1px solid #333; padding:8px; border-radius:6px; max-width:900px;">
     <div class="row" style="gap:10px; align-items:center;">
-      <button id="alertsRefresh">GET /stats/alerts</button>
+      <button id="alertsRefresh">GET /stats/alerts/history</button>
       <label><input type="checkbox" id="alertsAuto"/> auto-refresh</label>
       <input id="alertsInt" type="number" value="7" min="2" style="width:60px;"/> sec
+      <label>count <input id="alertsN" type="number" value="30" min="1" max="200" style="width:70px;"/></label>
       <span class="badge" id="alertsCount">0</span>
     </div>
     <ul id="alertsList" style="list-style:none; padding-left:10px; margin:6px 0 0 0;"></ul>

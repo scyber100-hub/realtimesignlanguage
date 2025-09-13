@@ -826,6 +826,8 @@ async def log_requests(request, call_next):
 class Stats:
     def __init__(self):
         from collections import deque
+        from services.config import get_settings as _gs
+        _st = _gs()
         self.timeline_total = 0
         self.replace_total = 0
         self.rate_limited_total = 0
@@ -836,7 +838,7 @@ class Stats:
         self.last_ingest_to_bc_ms: int | None = None
         self._lat_ms = deque(maxlen=5000)
         # Alerts history and last state
-        self._alerts = deque(maxlen=500)
+        self._alerts = deque(maxlen=max(1, int(getattr(_st, 'alerts_max_items', 500) or 500)))
         self._warn_last = {"latency_p90": False, "replace_ratio": False, "rate_limit_ratio": False}
 
     def on_timeline(self):

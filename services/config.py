@@ -19,6 +19,8 @@ class Settings:
     latency_p90_warn_ms: int = int(os.getenv("LATENCY_P90_WARN_MS", "1200"))
     replace_ratio_warn: float = float(os.getenv("REPLACE_RATIO_WARN", "0.5"))
     rate_limit_ratio_warn: float = float(os.getenv("RATE_LIMIT_RATIO_WARN", "0.1"))
+    # Alerts/history
+    alerts_max_items: int = int(os.getenv("ALERTS_MAX_ITEMS", "500"))
     # Replace tuning
     replace_min_events: int = int(os.getenv("REPLACE_MIN_EVENTS", "2"))
     replace_min_ms: int = int(os.getenv("REPLACE_MIN_MS", "300"))
