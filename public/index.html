@@ -22,9 +22,9 @@
     <span id="cfgOut" class="badge"></span>
   </div>
   <div class="row" id="alertBadges" style="gap:8px;">
-    <span class="badge" id="badgeLat" title="Latency p90 alert">latency: ok</span>
-    <span class="badge" id="badgeRep" title="Replace ratio alert">replace: ok</span>
-    <span class="badge" id="badgeRL" title="Rate limit ratio alert">rate-limit: ok</span>
+    <span class="badge" id="badgeLat" title="Latency p90 alert">⚡ latency: ok</span>
+    <span class="badge" id="badgeRep" title="Replace ratio alert">♻️ replace: ok</span>
+    <span class="badge" id="badgeRL" title="Rate limit ratio alert">🚥 rate-limit: ok</span>
   </div>
   <div class="row" style="gap:10px; align-items: center;">
     <label><input type="checkbox" id="auxToggle"/> include_aux_channels</label>
@@ -326,10 +326,11 @@
       try {
         const headers = {};
         const k = document.getElementById('apikey').value; if (k) headers['x-api-key'] = k;
-        const res = await fetch('/stats/alerts', { headers });
+        const res = await fetch('/stats/alerts/history?n=30', { headers });
         const data = await res.json();
-        const now = Date.now();
-        (data.alerts||[]).forEach(a => { a.ts = a.ts || now; pushAlert(a); });
+        recentAlerts.length = 0;
+        (data.alerts||[]).forEach(a => { recentAlerts.push(a); });
+        renderAlerts();
       } catch {}
     }
     const btnAR = document.getElementById('alertsRefresh'); if (btnAR) btnAR.onclick = fetchAlerts;
@@ -544,4 +545,5 @@
 </body>
 <span></span>
 </html>
+
 

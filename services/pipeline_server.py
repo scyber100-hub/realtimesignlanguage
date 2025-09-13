@@ -157,6 +157,36 @@ async def get_stats_alerts(_: None = Depends(require_api_key)):
     return {"count": len(alerts), "alerts": alerts}
 
 
+@app.get("/stats/alerts/history")
+async def get_stats_alerts_history(n: int = 30, _: None = Depends(require_api_key)):
+    try:
+        n = max(1, min(int(n), 200))
+    except Exception:
+        n = 30
+    try:
+        from collections import deque
+        if hasattr(stats, '_alerts') and isinstance(stats._alerts, (list, tuple, deque)):
+            items = list(stats._alerts)[-n:]
+            return {"count": len(items), "alerts": items}
+    except Exception:
+        pass
+    return {"count": 0, "alerts": []}
+
+
+@app.post("/stats/alerts/clear")
+async def clear_stats_alerts(_: None = Depends(require_api_key)):
+    try:
+        if hasattr(stats, '_alerts') and isinstance(stats._alerts, list):
+            stats._alerts.clear()
+        else:
+            # deque
+            while getattr(stats, '_alerts', None) and len(stats._alerts):
+                stats._alerts.popleft()
+        return {"ok": True}
+    except Exception:
+        return {"ok": False}
+
+
 @app.get("/config")
 async def get_config(_: None = Depends(require_api_key)):
     return {
@@ -805,6 +835,9 @@ class Stats:
         self._ingest_ts = deque(maxlen=5000)
         self.last_ingest_to_bc_ms: int | None = None
         self._lat_ms = deque(maxlen=5000)
+        # Alerts history and last state
+        self._alerts = deque(maxlen=500)
+        self._warn_last = {"latency_p90": False, "replace_ratio": False, "rate_limit_ratio": False}
 
     def on_timeline(self):
         from time import time as now
@@ -887,6 +920,19 @@ class Stats:
             out["warn_latency_p90"] = (out["latency_ms"]["p90"] is not None) and (out["latency_ms"]["p90"] > _st.latency_p90_warn_ms)
             out["warn_replace_ratio"] = (out["timeline_replace_ratio"] > _st.replace_ratio_warn)
             out["warn_rate_limit_ratio"] = (out["rate_limit_ratio"] > _st.rate_limit_ratio_warn)
+            # push alerts on rising edge
+            now = int(__import__('time').time() * 1000)
+            if out["warn_latency_p90"] and not self._warn_last.get("latency_p90"):
+                self._alerts.append({"ts": now, "type": "latency_p90", "p90": out["latency_ms"]["p90"], "threshold": _st.latency_p90_warn_ms})
+            if out["warn_replace_ratio"] and not self._warn_last.get("replace_ratio"):
+                self._alerts.append({"ts": now, "type": "replace_ratio", "value": out["timeline_replace_ratio"], "threshold": _st.replace_ratio_warn})
+            if out["warn_rate_limit_ratio"] and not self._warn_last.get("rate_limit_ratio"):
+                self._alerts.append({"ts": now, "type": "rate_limit_ratio", "value": out["rate_limit_ratio"], "threshold": _st.rate_limit_ratio_warn})
+            self._warn_last = {
+                "latency_p90": bool(out["warn_latency_p90"]),
+                "replace_ratio": bool(out["warn_replace_ratio"]),
+                "rate_limit_ratio": bool(out["warn_rate_limit_ratio"]),
+            }
         except Exception:
             out["warn_latency_p90"] = False
             out["warn_replace_ratio"] = False
