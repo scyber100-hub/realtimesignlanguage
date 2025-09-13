@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Tuple
+﻿from typing import List, Optional, Dict, Any, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,6 +87,11 @@ app.add_middleware(
 
 manager = ConnectionManager()
 
+# API key dependency used by protected endpoints
+def require_api_key(x_api_key: str | None = Header(default=None)):
+    if settings.api_key and x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="invalid api key")
+
 # 세션 상태: 증분 처리용(간단 버전)
 class SessionState(BaseModel):
     text: str = ""
@@ -108,6 +113,7 @@ INGEST_MSG = Counter("ingest_messages_total", "Number of ingest messages", label
 INGEST_TO_BC_MS = Histogram("ingest_to_broadcast_ms", "Latency from ingest message to timeline broadcast in ms")
 BROADCAST_ERR = Counter("timeline_broadcast_errors_total", "Number of websocket broadcast errors")
 WS_CLIENTS = Gauge("websocket_clients", "Number of connected websocket clients")
+RATE_LIMITED = Counter("ingest_rate_limited_total", "Number of ingest messages rate-limited")
 
 # Load timeline schema for validation
 _SCHEMA_PATH = Path("schemas/sign_timeline.schema.json")
@@ -288,10 +294,6 @@ async def gloss2timeline(payload: GlossIn):
     if _TIMELINE_SCHEMA is not None:
         jsonschema_validate(timeline, _TIMELINE_SCHEMA)
     return timeline
-
-def require_api_key(x_api_key: str | None = Header(default=None)):
-    if settings.api_key and x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="invalid api key")
 
 
 LOG_DIR = Path("logs")
@@ -527,6 +529,7 @@ async def ws_ingest(ws: WebSocket):
     try:
         while True:
             msg = await ws.receive_json()
+            start = time.perf_counter()
             payload = StreamIn(**msg)
             INGEST_MSG.labels(payload.type).inc()
             stats.on_ingest(payload.type)
@@ -592,15 +595,15 @@ async def ws_ingest(ws: WebSocket):
                         "events": new_timeline["events"][start_idx:end_idx],
                     },
                 }
-        await manager.broadcast_json(out)
-        stats.on_timeline()
-        _log_timeline("timeline.replace", out)
-        if payload.origin_ts:
-            lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
-            INGEST_TO_BC_MS.observe(lat)
-            stats.on_latency(lat)
-        TIMELINE_BC.inc()
-        stats.on_replace()
+                await manager.broadcast_json(out)
+                stats.on_timeline()
+                _log_timeline("timeline.replace", out)
+                if payload.origin_ts:
+                    lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
+                    INGEST_TO_BC_MS.observe(lat)
+                    stats.on_latency(lat)
+                TIMELINE_BC.inc()
+                stats.on_replace()
 
             st.events = new_timeline["events"]
 
@@ -680,10 +683,14 @@ async def lexicon_get(_: None = Depends(require_api_key)):
 @app.middleware("http")
 async def log_requests(request, call_next):
     start = time.perf_counter()
+    response = await call_next(request)
+    dur = (time.perf_counter() - start) * 1000.0
     try:
-        response = await call_next(request)
-        return response
-    finally:
+        logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
+    except Exception:
+        pass
+    return response
+
 # Lightweight runtime stats (for dashboard)
 class Stats:
     def __init__(self):
@@ -775,8 +782,6 @@ class Stats:
 
 
 stats = Stats()
-        dur = (time.perf_counter() - start) * 1000.0
-        logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
 
 
 # Static files (dashboard)
@@ -823,7 +828,7 @@ async def sessions_full(_: None = Depends(require_api_key)):
         preview = ''
         try:
             txt = getattr(st, 'last_text', '') or ''
-            preview = (txt[:40] + '…') if len(txt) > 40 else txt
+            preview = (txt[:40] + '...') if len(txt) > 40 else txt
         except Exception:
             preview = ''
         # recent replace ratio for this session from RECENT_EVENTS
@@ -849,7 +854,6 @@ async def sessions_full(_: None = Depends(require_api_key)):
             "replace_ratio_recent": rep_ratio,
         })
     return {"count": len(items), "items": items}
-
 
 @app.post("/lexicon/upload")
 async def lexicon_upload(file: UploadFile = File(...), _: None = Depends(require_api_key)):
@@ -913,6 +917,8 @@ async def lexicon_rollback(req: LexiconRollbackReq, _: None = Depends(require_ap
         set_overlay_lexicon(items)
         _audit_lexicon({"action": "rollback", "name": req.name, "size": len(items)})
         return {"ok": True, "name": req.name, "size": len(items)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def _audit_lexicon(data: Dict[str, Any], ts: Optional[int] = None) -> None:
