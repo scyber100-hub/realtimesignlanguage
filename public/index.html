@@ -46,6 +46,7 @@
     <div>timeline rate(1m): <b id="tl_rate">0</b>/s</div>
     <div>replace total: <b id="rep_total">0</b></div>
     <div>replace ratio: <span id="rep_ratio" class="badge">0</span></div>
+    <div>RL ratio: <span id="rl_ratio" class="badge">0</span></div>
     <div>ingest partial: <b id="ing_p">0</b></div>
     <div>ingest final: <b id="ing_f">0</b></div>
     <div>ingest rate(1m): <b id="ing_rate">0</b>/s</div>
@@ -218,6 +219,11 @@
         rctx.fillText('recent replace ratio', 10, 12);
       }
 
+      // simple moving-average helpers for hysteresis
+      const _avg = (arr) => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
+      const p90Hist = [];
+      const repHist = [];
+      const rlHist = [];
       ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
@@ -228,18 +234,36 @@
             document.getElementById('rep_total').textContent = s.timeline_replace_total ?? 0;
             (function(){
               const repEl = document.getElementById('rep_ratio');
-              const repRatio = s.timeline_replace_ratio ?? 0;
-              repEl.textContent = repRatio;
-              repEl.style.background = repRatio > (cfg.replace_ratio_warn||0.5) ? '#ff9aa2' : '#c2f0c2';
+              const repRatio = Number(s.timeline_replace_ratio ?? 0);
+              repEl.textContent = repRatio.toFixed(3);
+              repHist.push(repRatio); if (repHist.length>20) repHist.shift();
+              const repAvg = _avg(repHist);
+              const th = (cfg.replace_ratio_warn||0.5);
+              const bad = repAvg > th*1.05; // 5% margin
+              repEl.style.background = bad ? '#ff9aa2' : '#c2f0c2';
             })();
             document.getElementById('ing_p').textContent = s.ingest_partial_total ?? 0;
             document.getElementById('ing_f').textContent = s.ingest_final_total ?? 0;
             document.getElementById('ing_rate').textContent = s.ingest_rate_per_sec_1m ?? 0;
             (function(){
               const latEl = document.getElementById('last_lat');
-              const p90 = (s.latency_ms && s.latency_ms.p90) || 0;
+              const p90 = Number((s.latency_ms && s.latency_ms.p90) || 0);
               latEl.textContent = s.last_ingest_to_bc_ms ?? '-';
-              latEl.style.background = p90 > (cfg.latency_p90_warn_ms||1200) ? '#ff9aa2' : '#c2f0c2';
+              p90Hist.push(p90); if (p90Hist.length>10) p90Hist.shift();
+              const p90Avg = _avg(p90Hist);
+              const th = (cfg.latency_p90_warn_ms||1200);
+              const bad = p90Avg > th*1.05;
+              latEl.style.background = bad ? '#ff9aa2' : '#c2f0c2';
+            })();
+            (function(){
+              const rlEl = document.getElementById('rl_ratio');
+              const rlRatio = Number(s.rate_limit_ratio ?? 0);
+              rlEl.textContent = rlRatio.toFixed(3);
+              rlHist.push(rlRatio); if (rlHist.length>20) rlHist.shift();
+              const rlAvg = _avg(rlHist);
+              const th = (cfg.rate_limit_ratio_warn||0.1);
+              const bad = rlAvg > th*1.05;
+              rlEl.style.background = bad ? '#ff9aa2' : '#c2f0c2';
             })();
             document.getElementById('sess_count').textContent = s.session_count ?? 0;
             if (document.getElementById('rl_total')) document.getElementById('rl_total').textContent = s.ingest_rate_limited_total ?? 0;
