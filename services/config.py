@@ -25,6 +25,12 @@ class Settings:
     replace_min_events: int = int(os.getenv("REPLACE_MIN_EVENTS", "2"))
     replace_min_ms: int = int(os.getenv("REPLACE_MIN_MS", "300"))
     replace_min_interval_ms: int = int(os.getenv("REPLACE_MIN_INTERVAL_MS", "150"))
+    # Unity UDP adapter (optional): host:port to send timeline JSON
+    unity_udp_addr: str | None = os.getenv("UNITY_UDP_ADDR")
+    # Static files cache-control (seconds)
+    static_max_age_s: int = int(os.getenv("STATIC_MAX_AGE_S", "3600"))
+    # GZip compression for dynamic responses
+    enable_gzip: bool = os.getenv("ENABLE_GZIP", "1") == "1"
 
 
 @lru_cache

@@ -30,3 +30,56 @@ Unity 아바타 연동 가이드(초안)
 - 알파 채널 있는 영상 출력(ProRes 4444 등) 또는 녹색 배경 키잉
 - 카메라/조명 고정, 손가락/표정 디테일 강조, 인셋 16:9 → 9:16 변형 고려
 
+Unity Adapter (UDP Mirror)
+
+Overview
+- 서버는 기본적으로 WebSocket(`/ws/timeline`)으로 타임라인을 푸시합니다.
+- Unity에서도 손쉽게 수신할 수 있도록, 선택적으로 UDP로 동일 JSON을 미러링할 수 있게 했습니다.
+
+Enable UDP Mirror
+- 환경변수 설정: `UNITY_UDP_ADDR=127.0.0.1:9001`
+- 서버 시작 후, 모든 `timeline`/`timeline.replace` 이벤트가 지정된 UDP 주소로 JSON 라인 형식으로 전송됩니다.
+
+JSON Format
+- 동일한 구조가 전송됩니다.
+  - timeline: `{ "type":"timeline", "data": { id, events:[{t_ms, dur_ms, clip, channel?}], ... } }`
+  - timeline.replace: `{ "type":"timeline.replace", "from_t_ms": N, "data": { id, events:[...] } }`
+
+Unity C# 수신 예시 (간단)
+```csharp
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using UnityEngine;
+
+public class TimelineUdpReceiver : MonoBehaviour
+{
+    public int port = 9001;
+    UdpClient client;
+
+    void Start()
+    {
+        client = new UdpClient(port);
+        client.BeginReceive(ReceiveCallback, null);
+    }
+
+    void ReceiveCallback(IAsyncResult ar)
+    {
+        IPEndPoint ep = new IPEndPoint(IPAddress.Any, port);
+        byte[] data = client.EndReceive(ar, ref ep);
+        string json = Encoding.UTF8.GetString(data);
+        Debug.Log($"Timeline JSON: {json}");
+        // TODO: parse JSON and drive animation
+        client.BeginReceive(ReceiveCallback, null);
+    }
+
+    void OnDestroy()
+    {
+        client?.Close();
+    }
+}
+```
+
+Notes
+- UDP는 신뢰성이 낮으므로, Unity에서 누락에 대비한 보간/보정 로직을 권장합니다.
+- 더 안정적인 연동은 WebSocket 클라이언트를 Unity에서 사용하거나, TCP 기반 gRPC/WS를 고려하세요.

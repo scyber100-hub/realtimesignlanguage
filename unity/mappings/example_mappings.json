@@ -1,0 +1,14 @@
+{
+  "mappings": [
+    { "clip": "HELLO",  "stateName": "Base.HELLO",  "layer": 0 },
+    { "clip": "KOREA",  "stateName": "Base.KOREA",  "layer": 0 },
+    { "clip": "WEATHER","stateName": "Base.WEATHER","layer": 0 }
+  ],
+  "channelLayers": [
+    { "channel": "main",   "layer": 0 },
+    { "channel": "accent", "layer": 1 }
+  ],
+  "useCrossFade": true,
+  "crossFadeDuration": 0.12
+}
+

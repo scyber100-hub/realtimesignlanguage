@@ -12,10 +12,16 @@ async def main():
     ap.add_argument('--chunk_ms', type=int, default=100)
     ap.add_argument('--api-key', default=None)
     ap.add_argument('--session', default='asr1')
+    ap.add_argument('--language', default='ko', help='language hint for ASR (e.g., ko, en)')
     args = ap.parse_args()
 
     url = args.url
-    if args.api_key and '?key=' not in url:
+    # attach language
+    if 'language=' not in url:
+        sep = '&' if '?' in url else '?'
+        url = f"{url}{sep}language={args.language}"
+    # attach api key
+    if args.api_key and 'key=' not in url:
         sep = '&' if '?' in url else '?'
         url = f"{url}{sep}key={args.api_key}"
 

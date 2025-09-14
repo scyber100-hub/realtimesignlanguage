@@ -1,6 +1,7 @@
-Ôªøfrom typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
@@ -8,7 +9,7 @@ import time
 import json
 
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
-from fastapi.responses import Response
+from fastapi.responses import Response, RedirectResponse
 from jsonschema import validate as jsonschema_validate, Draft202012Validator
 from pathlib import Path
 import os
@@ -16,8 +17,10 @@ import os
 from packages.ksl_rules import tokenize_ko, ko_to_gloss, set_overlay_lexicon, load_overlay_lexicon
 from packages.sign_timeline import compile_glosses
 from services.config import get_settings
+from services.static_files import CachedStaticFiles
 import logging
 from typing import Callable
+import socket
 
 
 class IngestText(BaseModel):
@@ -85,6 +88,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+if getattr(settings, 'enable_gzip', True):
+    try:
+        app.add_middleware(GZipMiddleware, minimum_size=512)
+    except Exception:
+        pass
+
 manager = ConnectionManager()
 
 # API key dependency used by protected endpoints
@@ -92,7 +101,7 @@ def require_api_key(x_api_key: str | None = Header(default=None)):
     if settings.api_key and x_api_key != settings.api_key:
         raise HTTPException(status_code=401, detail="invalid api key")
 
-# ÏÑ∏ÏÖò ÏÉÅÌÉú: Ï¶ùÎ∂Ñ Ï≤òÎ¶¨Ïö©(Í∞ÑÎã® Î≤ÑÏ†Ñ)
+# ººº« ªÛ≈¬: ¡ı∫– √≥∏ÆøÎ(∞£¥‹ πˆ¿¸)
 class SessionState(BaseModel):
     text: str = ""
     events: List[Dict[str, Any]] = []
@@ -301,15 +310,19 @@ async def get_last_timeline(_: None = Depends(require_api_key)):
         return {"exists": False}
 
 @app.get("/events/recent")
-async def events_recent(n: int = 100, session_id: Optional[str] = None, _: None = Depends(require_api_key)):
+async def events_recent(n: int = 100, session_id: Optional[str] = None, offset: int = 0, _: None = Depends(require_api_key)):
     try:
         n = max(1, min(int(n), RECENT_EVENTS_MAX))
     except Exception:
         n = 100
     if isinstance(RECENT_EVENTS, list):
-        items = RECENT_EVENTS[-n:]
+        arr = RECENT_EVENTS
     else:
-        items = list(RECENT_EVENTS)[-n:]
+        arr = list(RECENT_EVENTS)
+    # tail window with optional offset
+    start = max(0, len(arr) - n - max(0, int(offset)))
+    end = max(0, len(arr) - max(0, int(offset)))
+    items = arr[start:end]
     if session_id:
         items = [x for x in items if x.get("session_id") == session_id]
     return {"count": len(items), "items": items}
@@ -405,10 +418,6 @@ async def gloss2timeline(payload: GlossIn):
         jsonschema_validate(timeline, _TIMELINE_SCHEMA)
     return timeline
 
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/master
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 TIMELINE_LOG = LOG_DIR / "timeline.log"
@@ -417,6 +426,9 @@ VERS_DIR.mkdir(parents=True, exist_ok=True)
 LAST_TIMELINE_PATH = LOG_DIR / "last_timeline.json"
 LEX_AUDIT = LOG_DIR / "lexicon_audit.log"
 RECENT_EVENTS_MAX = 300
+# Config presets directory
+PRESETS_DIR = Path("configs/presets")
+PRESETS_DIR.mkdir(parents=True, exist_ok=True)
 try:
     from collections import deque as _deque
     RECENT_EVENTS = _deque(maxlen=RECENT_EVENTS_MAX)
@@ -455,8 +467,141 @@ def _log_timeline(evt_type: str, payload: Dict[str, Any]):
                 RECENT_EVENTS.append(item)
         except Exception:
             pass
+        # Optional mirror to Unity via UDP for quick prototyping
+        try:
+            if getattr(settings, 'unity_udp_addr', None):
+                host, port = str(settings.unity_udp_addr).split(":", 1)
+                addr = (host, int(port))
+                data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setblocking(False)
+                try:
+                    sock.sendto(data, addr)
+                finally:
+                    sock.close()
+        except Exception:
+            pass
     except Exception as e:
         logger.debug(f"timeline log error: {e}")
+
+
+class PresetReq(BaseModel):
+    name: str
+    note: Optional[str] = None
+
+
+@app.get("/config/presets")
+async def list_presets(_: None = Depends(require_api_key)):
+    try:
+        items = []
+        for p in sorted(PRESETS_DIR.glob("*.json")):
+            try:
+                st = p.stat()
+                items.append({"name": p.name, "mtime": int(st.st_mtime * 1000), "size": st.st_size})
+            except Exception:
+                continue
+        return {"count": len(items), "items": items}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/config/preset/save")
+async def save_preset(req: PresetReq, _: None = Depends(require_api_key)):
+    try:
+        # snapshot current settings
+        snap = {
+            "include_aux_channels": settings.include_aux_channels,
+            "max_ingest_rps": settings.max_ingest_rps,
+            "latency_p90_warn_ms": settings.latency_p90_warn_ms,
+            "replace_ratio_warn": settings.replace_ratio_warn,
+            "rate_limit_ratio_warn": settings.rate_limit_ratio_warn,
+            "replace_min_events": settings.replace_min_events,
+            "replace_min_ms": settings.replace_min_ms,
+            "replace_min_interval_ms": settings.replace_min_interval_ms,
+            "note": req.note or "",
+            "saved_ms": int(time.time() * 1000),
+        }
+        name = req.name.strip().replace("/", "_").replace("\\", "_") or "preset"
+        path = PRESETS_DIR / f"{name}.json"
+        path.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "path": str(path)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/config/preset/load")
+async def load_preset(req: PresetReq, _: None = Depends(require_api_key)):
+    try:
+        name = req.name.strip().replace("/", "_").replace("\\", "_")
+        path = PRESETS_DIR / f"{name}.json"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="preset not found")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        # mutate live settings
+        for k in [
+            "include_aux_channels",
+            "max_ingest_rps",
+            "latency_p90_warn_ms",
+            "replace_ratio_warn",
+            "rate_limit_ratio_warn",
+            "replace_min_events",
+            "replace_min_ms",
+            "replace_min_interval_ms",
+        ]:
+            if k in data:
+                setattr(settings, k, data[k])
+        return {"ok": True, "loaded": name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/logs/timeline")
+async def logs_timeline(n: int = 100, type: Optional[str] = None, _: None = Depends(require_api_key)):
+    try:
+        if not TIMELINE_LOG.exists():
+            return {"count": 0, "items": []}
+        n = max(1, min(int(n), 1000))
+        lines = TIMELINE_LOG.read_text(encoding="utf-8", errors="ignore").splitlines()
+        tail = lines[-n:]
+        out = []
+        for ln in tail:
+            try:
+                obj = json.loads(ln)
+                if type and obj.get("type") != type:
+                    continue
+                out.append(obj)
+            except Exception:
+                continue
+        return {"count": len(out), "items": out}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/logs/timeline.csv")
+async def logs_timeline_csv(n: int = 100, type: Optional[str] = None, _: None = Depends(require_api_key)):
+    try:
+        if not TIMELINE_LOG.exists():
+            return Response(content="ts,type,session_id,id,from_t_ms,event_count\n", media_type="text/csv")
+        n = max(1, min(int(n), 1000))
+        lines = TIMELINE_LOG.read_text(encoding="utf-8", errors="ignore").splitlines()
+        tail = lines[-n:]
+        rows = ["ts,type,session_id,id,from_t_ms,event_count"]
+        for ln in tail:
+            try:
+                obj = json.loads(ln)
+                if type and obj.get("type") != type:
+                    continue
+                rows.append(
+                    f"{obj.get('ts','')},{obj.get('type','')},{obj.get('session_id','')},{obj.get('id','')},{obj.get('from_t_ms','')},{obj.get('event_count','')}"
+                )
+            except Exception:
+                continue
+        csv = "\n".join(rows) + "\n"
+        return Response(content=csv, media_type="text/csv")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 async def _stats_broadcaster():
@@ -490,9 +635,9 @@ async def ingest_text(payload: IngestText, _: None = Depends(require_api_key)):
 async def ws_timeline(ws: WebSocket):
     await manager.connect(ws)
     try:
-        # Îã®Ïàú keep-alive; ÌÅ¥ÎùºÏù¥Ïñ∏Ìä∏Îäî ÏàòÏã†Îßå Ìï¥ÎèÑ Îê®
+        # ¥‹º¯ keep-alive; ≈¨∂Û¿Ãæ∆Æ¥¬ ºˆΩ≈∏∏ «ÿµµ µ 
         while True:
-            # ÌÅ¥ÎùºÏù¥Ïñ∏Ìä∏Í∞Ä ping/pong ÎòêÎäî noop Î©îÏãúÏßÄ Î≥¥ÎÇº Ïàò ÏûàÏùå
+            # ≈¨∂Û¿Ãæ∆Æ∞° ping/pong ∂«¥¬ noop ∏ﬁΩ√¡ˆ ∫∏≥æ ºˆ ¿÷¿Ω
             _ = await ws.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(ws)
@@ -536,7 +681,7 @@ async def _process_stream_in(payload: StreamIn):
             # collapse internal whitespace
             s2 = " ".join(s2.split())
             # drop trailing punctuation bursts often emitted by streamers
-            while s2 and s2[-1] in ",.!?‚Ä¶¬∑" :
+            while s2 and s2[-1] in ",.!?°¶°§" :
                 s2 = s2[:-1].rstrip()
             return s2
         except Exception:
@@ -598,15 +743,17 @@ async def _process_stream_in(payload: StreamIn):
 
 # Optional Whisper streaming transcriber (very simple, best-effort)
 class _WhisperStreamer:
-    def __init__(self, model_name: str = "base", device: str = "cpu", compute: str = "int8", beam_size: int = 1):
+    def __init__(self, model_name: str = "base", device: str = "cpu", compute: str = "int8", beam_size: int = 1, language: str | None = "ko"):
         try:
             from faster_whisper import WhisperModel  # type: ignore
             self.model = WhisperModel(model_name, device=device, compute_type=compute)
             self.beam_size = beam_size
+            self.language = language or "ko"
         except Exception:
             self.model = None
+            self.language = language or "ko"
 
-    def transcribe_pcm16le(self, pcm_bytes: bytes, sample_rate: int = 16000) -> str:
+    def transcribe_pcm16le(self, pcm_bytes: bytes, sample_rate: int = 16000, language: str | None = None) -> str:
         if not self.model or not pcm_bytes:
             return ""
         try:
@@ -614,7 +761,7 @@ class _WhisperStreamer:
             pcm = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
             segments, _ = self.model.transcribe(
                 pcm,
-                language="ko",
+                language=(language or self.language or "ko"),
                 vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 200},
                 beam_size=self.beam_size or 1,
@@ -696,108 +843,6 @@ async def ws_ingest(ws: WebSocket):
             pass
 
 
-@app.websocket("/ws/ingest")
-async def ws_ingest(ws: WebSocket):
-    # optional API key via query param 'key'
-    key = ws.query_params.get("key")
-    if settings.api_key and key != settings.api_key:
-        await ws.close(code=4401)
-        return
-    await ws.accept()
-    try:
-        while True:
-            start = time.perf_counter()
-            msg = await ws.receive_json()
-            start = time.perf_counter()
-            payload = StreamIn(**msg)
-            INGEST_MSG.labels(payload.type).inc()
-            stats.on_ingest(payload.type)
-            st = sessions.get(payload.session_id)
-            if not st:
-                st = SessionState()
-                sessions[payload.session_id] = st
-            # rate limiting per session
-            now_ms = int(time.time() * 1000)
-            window_ms = 1000
-            st.recent_ms = [t for t in st.recent_ms if now_ms - t <= window_ms]
-            if len(st.recent_ms) >= max(1, settings.max_ingest_rps):
-                RATE_LIMITED.inc()
-                await ws.send_json({"ok": False, "rate_limited": True, "session_id": payload.session_id})
-                continue
-            st.recent_ms.append(now_ms)
-            if payload.start_ms is not None:
-                st.start_ms = int(payload.start_ms)
-            if payload.gap_ms is not None:
-                st.gap_ms = int(payload.gap_ms)
-
-            # Ï†ÑÏ≤¥ ÌÖçÏä§Ìä∏ Í∏∞Ï§ÄÏúºÎ°ú Îã®Ïàú Ï¶ùÎ∂Ñ Ï≤òÎ¶¨
-            st.text = payload.text
-            tokens = tokenize_ko(st.text)
-            glosses = ko_to_gloss(tokens)
-            new_timeline = compile_glosses(glosses, start_ms=st.start_ms, gap_ms=st.gap_ms, include_aux_channels=settings.include_aux_channels)
-            if st.base_id is None:
-                st.base_id = new_timeline["id"]
-            st.last_update_ms = int(time.time() * 1000)
-
-            old_clips = [e["clip"] for e in st.events]
-            new_clips = [e["clip"] for e in new_timeline["events"]]
-            start_idx, end_idx = _diff_window(old_clips, new_clips)
-
-            # ÍµêÏ≤¥ ÏãúÏûë ÏãúÍ∞Ñ ÏÇ∞Ï†ï
-            if start_idx < len(new_timeline["events"]):
-                from_t = new_timeline["events"][start_idx]["t_ms"]
-            else:
-                from_t = new_timeline["events"][-1]["t_ms"] if new_timeline["events"] else 0
-
-            # Î©îÏãúÏßÄ Ï†ÑÏÜ°: ÏµúÏ¥àÏóêÎäî full timeline, Ïù¥ÌõÑÏóêÎäî replace
-            if not st.events:
-                out = {
-                    "type": "timeline",
-                    "session_id": payload.session_id,
-                    "data": new_timeline,
-                }
-                await manager.broadcast_json(out)
-                stats.on_timeline()
-                _log_timeline("timeline", out)
-                if payload.origin_ts:
-                    lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
-                    INGEST_TO_BC_MS.observe(lat)
-                    stats.on_latency(lat)
-                TIMELINE_BC.inc()
-            else:
-                out = {
-                    "type": "timeline.replace",
-                    "session_id": payload.session_id,
-                    "from_t_ms": from_t,
-                    "data": {
-                        "id": st.base_id,
-                        "events": new_timeline["events"][start_idx:end_idx],
-                    },
-                }
-                await manager.broadcast_json(out)
-                stats.on_timeline()
-                _log_timeline("timeline.replace", out)
-                if payload.origin_ts:
-                    lat = max(0, int(time.time()*1000) - int(payload.origin_ts))
-                    INGEST_TO_BC_MS.observe(lat)
-                    stats.on_latency(lat)
-                TIMELINE_BC.inc()
-                stats.on_replace()
-
-            st.events = new_timeline["events"]
-
-            # ÏöîÏ≤≠ÏûêÏóêÍ≤åÎèÑ ack
-            proc_ms = int((time.perf_counter() - start) * 1000)
-            await ws.send_json({"ok": True, "session_id": payload.session_id, "is_final": payload.type == "final", "proc_ms": proc_ms})
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        try:
-            await ws.close()
-        except Exception:
-            pass
-
-
 @app.on_event("startup")
 async def _on_startup():
     # start stats broadcaster
@@ -854,7 +899,7 @@ async def lexicon_update(payload: LexiconUpdate, _: None = Depends(require_api_k
 
 @app.get("/lexicon")
 async def lexicon_get(_: None = Depends(require_api_key)):
-    # Î≥¥ÏïàÏùÑ ÏúÑÌï¥ Ïò§Î≤ÑÎ†àÏù¥ ÌÅ¨Í∏∞Îßå Í≥µÍ∞ú, ÏÉÅÏÑ∏Îäî Í¥ÄÎ¶¨ Ïö©ÎèÑÎ°ú Î∞òÌôò
+    # ∫∏æ»¿ª ¿ß«ÿ ø¿πˆ∑π¿Ã ≈©±‚∏∏ ∞¯∞≥, ªÛºº¥¬ ∞¸∏Æ øÎµµ∑Œ π›»Ø
     from packages.ksl_rules.rules import _OVERLAY  # type: ignore
     return {"size": len(_OVERLAY), "items": _OVERLAY}
 
@@ -862,21 +907,30 @@ async def lexicon_get(_: None = Depends(require_api_key)):
 @app.middleware("http")
 async def log_requests(request, call_next):
     start = time.perf_counter()
-    response = await call_next(request)
-    dur = (time.perf_counter() - start) * 1000.0
     try:
-<<<<<<< HEAD
-        logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
-    except Exception:
-        pass
-    return response
-=======
         response = await call_next(request)
         return response
     finally:
         dur = (time.perf_counter() - start) * 1000.0
-        logger.info(f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}")
->>>>>>> origin/master
+        try:
+            logger.info(
+                f"{request.method} {request.url.path} {int(dur)}ms status={getattr(response,'status_code',0)}"
+            )
+        except Exception:
+            pass
+
+
+@app.middleware("http")
+async def cache_headers(request, call_next):
+    response = await call_next(request)
+    try:
+        p = request.url.path or ""
+        # Disable caching for dynamic JSON APIs
+        if p.startswith("/config") or p.startswith("/stats") or p.startswith("/events") or p.startswith("/sessions") or p in ("/healthz",):
+            response.headers["Cache-Control"] = "no-store"
+    except Exception:
+        pass
+    return response
 
 # Lightweight runtime stats (for dashboard)
 class Stats:
@@ -1001,7 +1055,7 @@ class Stats:
 stats = Stats()
 
 
-# Static files (dashboard) ‚Äî mount at end so API routes take precedence
+# Static files (dashboard) ? mount at end so API routes take precedence
 
 # Session purger (separate startup hook)
 PURGED_SESS = Counter("sessions_purged_total", "Number of sessions purged due to TTL")
@@ -1034,7 +1088,9 @@ async def _start_session_purger():
 
 
 @app.get("/sessions_full")
-async def sessions_full(_: None = Depends(require_api_key)):
+async def sessions_full(limit: int = 100, offset: int = 0, sort: str = "last_update_ms", dir: str = "desc", _: None = Depends(require_api_key)):
+    limit = max(1, min(int(limit), 1000))
+    offset = max(0, int(offset))
     items = []
     for sid, st in sessions.items():
         preview = ''
@@ -1065,7 +1121,16 @@ async def sessions_full(_: None = Depends(require_api_key)):
             "last_text_preview": preview,
             "replace_ratio_recent": rep_ratio,
         })
-    return {"count": len(items), "items": items}
+    # sorting
+    key = sort if sort in ("session_id","text_len","events","start_ms","gap_ms","last_update_ms","replace_ratio_recent") else "last_update_ms"
+    reverse = (str(dir).lower() != "asc")
+    try:
+        items.sort(key=lambda x: x.get(key) if x.get(key) is not None else 0, reverse=reverse)
+    except Exception:
+        pass
+    total = len(items)
+    out = items[offset:offset+limit]
+    return {"count": total, "items": out}
 
 @app.post("/lexicon/upload")
 async def lexicon_upload(file: UploadFile = File(...), _: None = Depends(require_api_key)):
@@ -1180,6 +1245,7 @@ async def ws_asr(ws: WebSocket):
         model = ws.query_params.get("model") or "base"
         device = ws.query_params.get("device") or "cpu"
         compute = ws.query_params.get("compute") or "int8"
+        language = ws.query_params.get("language") or "ko"
         try:
             beam_size = int(ws.query_params.get("beam_size") or 1)
         except Exception:
@@ -1188,7 +1254,7 @@ async def ws_asr(ws: WebSocket):
             chunk_ms = int(ws.query_params.get("chunk_ms") or 400)
         except Exception:
             chunk_ms = 400
-        streamer = _WhisperStreamer(model_name=model, device=device, compute=compute, beam_size=beam_size)
+        streamer = _WhisperStreamer(model_name=model, device=device, compute=compute, beam_size=beam_size, language=language)
         ring = bytearray()
         chunk_bytes = int(16000 * 2 * (chunk_ms/1000.0))
         while True:
@@ -1204,7 +1270,14 @@ async def ws_asr(ws: WebSocket):
                         session_id = payload.session_id
                         # store ASR meta on session
                         st = sessions.get(session_id) or SessionState()
-                        st.meta.update({"model": model, "device": device, "compute": compute, "beam_size": beam_size, "chunk_ms": chunk_ms})
+                        st.meta.update({
+                            "model": model,
+                            "device": device,
+                            "compute": compute,
+                            "beam_size": beam_size,
+                            "chunk_ms": chunk_ms,
+                            "language": language,
+                        })
                         sessions[session_id] = st
                     res = await _process_stream_in(payload)
                     await ws.send_json(res)
@@ -1219,7 +1292,7 @@ async def ws_asr(ws: WebSocket):
                 await ws.send_json({"ok": True, "bytes": len(b)})
                 if len(ring) >= chunk_bytes and session_id:
                     # best-effort local transcription
-                    text = streamer.transcribe_pcm16le(bytes(ring))
+                    text = streamer.transcribe_pcm16le(bytes(ring), language=language)
                     if text:
                         res = await _process_stream_in(StreamIn(type="partial", session_id=session_id, text=text))
                         await ws.send_json(res)
@@ -1232,9 +1305,45 @@ async def ws_asr(ws: WebSocket):
         except Exception:
             pass
 
+# Root redirect to dashboard (avoid relying on non-UTF index.html)
+@app.get("/")
+async def _root_redirect():
+    return RedirectResponse(url="/dashboard.html")
+
 # Mount static after routes
 try:
-    app.mount('/', StaticFiles(directory='public', html=True), name='public')
+    app.mount('/', CachedStaticFiles(directory='public', html=True, cache_seconds=getattr(settings, 'static_max_age_s', 3600)), name='public')
 except Exception:
     pass
 
+
+@app.get("/sessions/{session_id}")
+async def session_detail(session_id: str, n_events: int = 20, _: None = Depends(require_api_key)):
+    try:
+        st = sessions.get(session_id)
+        if not st:
+            raise HTTPException(status_code=404, detail="session not found")
+        try:
+            n_events = max(0, min(int(n_events), 200))
+        except Exception:
+            n_events = 20
+        try:
+            evs = getattr(st, 'events', []) or []
+            recent_events = evs[-n_events:]
+        except Exception:
+            recent_events = []
+        return {
+            "session_id": session_id,
+            "text_len": len(getattr(st, 'text', '') or ''),
+            "events": len(getattr(st, 'events', []) or []),
+            "start_ms": getattr(st, 'start_ms', 0),
+            "gap_ms": getattr(st, 'gap_ms', 0),
+            "last_update_ms": getattr(st, 'last_update_ms', 0),
+            "meta": getattr(st, 'meta', {}),
+            "last_text": getattr(st, 'last_text', ''),
+            "recent_events": recent_events,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

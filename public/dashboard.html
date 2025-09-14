@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Realtime KOR-&gt;KSL Dashboard</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Realtime KOR-&gt;KSL Dashboard <span class="badge" id="status">disconnected</span></h1>
+
+    <div class="row sticky card" id="summaryRow">
+      <span class="badge" id="sumTl">timeline total: 0</span>
+      <span class="badge" id="sumTlRate">timeline rate(1m): 0/s</span>
+      <span class="badge" id="sumIngestRate">ingest rate(1m): 0/s</span>
+      <span class="badge" id="sumSess">sessions: 0</span>
+      <span class="badge" id="sumWs">ws clients: 0</span>
+    </div>
+
+    <div class="row">
+      <input id="apikey" type="text" placeholder="x-api-key (optional)" style="width:260px;"/>
+      <button id="cfgBtn">GET /config</button>
+      <span id="cfgOut" class="badge"></span>
+    </div>
+
+    <div class="row" id="alertBadges" style="gap:8px;">
+      <span class="badge" id="badgeLat" title="Latency p90 alert">latency: ok</span>
+      <span class="badge" id="badgeRep" title="Replace ratio alert">replace: ok</span>
+      <span class="badge" id="badgeRL" title="Rate limit ratio alert">rate-limit: ok</span>
+    </div>
+
+    <div class="row" style="gap:10px; align-items: center;">
+      <label><input type="checkbox" id="auxToggle"/> include_aux_channels</label>
+      <label>max_ingest_rps <input type="number" id="rpsInput" min="1" style="width:100px;"/></label>
+      <button id="cfgUpdate">POST /config/update</button>
+    </div>
+
+    <div class="row" style="gap:10px; align-items: center;">
+      <label>p90 warn(ms) <input type="number" id="latWarn" value="1200" style="width:100px;"/></label>
+      <label>rep warn <input type="number" id="repWarn" value="0.5" step="0.01" min="0" max="1" style="width:100px;"/></label>
+      <label>RL warn <input type="number" id="rlWarn" value="0.1" step="0.01" min="0" max="1" style="width:100px;"/></label>
+      <button id="thUpdate">Update thresholds</button>
+    </div>
+
+    <div class="row" id="presetMount"></div>
+
+    <pre id="log" class="card" style="margin-top:10px"></pre>
+
+    <h2 style="margin-top:16px; font-size:16px;">Latency</h2>
+    <canvas id="hist" width="900" height="120" style="border:1px solid var(--border); margin-top:6px;"></canvas>
+    <canvas id="spark" width="900" height="60" style="border:1px solid var(--border); margin-top:6px;"></canvas>
+    <div class="row" style="gap:10px; align-items:center;">
+      <span class="badge">legend: latency p90 (sparkline)</span>
+    </div>
+
+    <h2 style="margin-top:16px; font-size:16px;">Replace Ratio</h2>
+    <canvas id="repSpark" width="900" height="60" style="border:1px solid var(--border); margin-top:6px;"></canvas>
+    <div class="row" style="gap:10px; align-items:center;">
+      <span class="badge">legend: replace ratio (sparkline)</span>
+    </div>
+
+    <h2 style="margin-top:16px; font-size:16px;">Alerts</h2>
+    <div class="row" style="gap:10px; align-items:center;">
+      <button id="alertsRefresh">GET /stats/alerts/history</button>
+      <label><input type="checkbox" id="alertsAuto"/> auto-refresh</label>
+      <input id="alertsInt" type="number" value="7" min="2" style="width:60px;"/> sec
+      <label>count <input id="alertsN" type="number" value="30" min="1" max="200" style="width:70px;"/></label>
+      <span class="badge" id="alertsCount">0</span>
+    </div>
+    <ul id="alertsList" style="list-style:none; padding-left:10px; margin:6px 0 0 0;"></ul>
+
+    <h2 style="margin-top:16px; font-size:16px;">Sessions</h2>
+    <div class="row" style="gap:10px; align-items:center;">
+      <button id="sessList">GET /sessions_full</button>
+      <label>filter <input id="sessFilter" type="text" placeholder="session id" style="width:160px;"/></label>
+      <label>auto <input id="sessInt" type="number" value="5" min="1" style="width:60px;"/>s</label>
+      <label><input type="checkbox" id="autoSess"/> auto-refresh</label>
+      <label>page size <input id="sessPageSize" type="number" value="20" min="1" style="width:70px;"/></label>
+      <button id="sessPrev">Prev</button>
+      <input id="sessPage" type="number" value="1" min="1" style="width:60px;"/>
+      <button id="sessNext">Next</button>
+      <span class="badge" id="sessPageInfo">page 1/1</span>
+    </div>
+    <table id="sessTable">
+      <thead><tr>
+        <th data-sort="session_id">session</th>
+        <th data-sort="events" style="text-align:right">events</th>
+        <th data-sort="text_len" style="text-align:right">text len</th>
+        <th data-sort="last_update_ms" style="text-align:right">last update(ms)</th>
+        <th>last text</th>
+        <th>meta</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="row" style="gap:10px; align-items:center;">
+      <label>detail session <input id="sessDetailId" type="text" placeholder="session id" style="width:160px;"/></label>
+      <label>n events <input id="sessDetailN" type="number" value="20" min="0" max="200" style="width:80px;"/></label>
+      <button id="sessDetailBtn">GET /sessions/{id}</button>
+    </div>
+    <pre id="sessDetailOut" class="card" style="display:block; max-height:220px;"></pre>
+
+    <h2 style="margin-top:16px; font-size:16px;">Events</h2>
+    <div class="row" style="gap:10px; align-items:center;">
+      <button id="evFetch">GET /events/recent</button>
+      <label>n <input id="evN" type="number" value="50" min="1" max="500" style="width:70px;"/></label>
+      <label>session <input id="evSessFilter" type="text" placeholder="session id" style="width:160px;"/></label>
+      <label>page size <input id="evPageSize" type="number" value="50" min="1" style="width:70px;"/></label>
+      <button id="evPrev">Prev</button>
+      <input id="evPage" type="number" value="1" min="1" style="width:60px;"/>
+      <button id="evNext">Next</button>
+      <span class="badge" id="evPageInfo">page 1/1</span>
+    </div>
+    <pre id="evOut" class="card" style="display:block; max-height:180px;"></pre>
+    <div class="row" style="gap:8px; align-items:center;">
+      <span class="badge" id="evSummary">summary: -</span>
+    </div>
+
+    <h2 style="margin-top:16px; font-size:16px;">Timeline Logs</h2>
+    <div class="row" style="gap:10px; align-items:center;">
+      <button id="logFetch">GET /logs/timeline</button>
+      <label>n <input id="logN" type="number" value="50" min="1" max="1000" style="width:70px;"/></label>
+      <label>type
+        <select id="logType">
+          <option value="">any</option>
+          <option value="timeline">timeline</option>
+          <option value="timeline.replace">timeline.replace</option>
+        </select>
+      </label>
+    </div>
+    <div class="row" style="gap:10px; align-items:center;">
+      <button id="logDownloadCsv">Download CSV</button>
+    </div>
+    <pre id="logOut" class="card" style="display:block; max-height:220px;"></pre>
+
+  </div>
+
+  <script src="/presets.js"></script>
+  <script src="/dashboard.js"></script>
+  <script>window.Dashboard && window.Dashboard.init();</script>
+</body>
+</html>

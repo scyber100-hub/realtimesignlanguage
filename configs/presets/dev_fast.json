@@ -1,0 +1,12 @@
+{
+  "include_aux_channels": true,
+  "max_ingest_rps": 20,
+  "latency_p90_warn_ms": 1200,
+  "replace_ratio_warn": 0.5,
+  "rate_limit_ratio_warn": 0.1,
+  "replace_min_events": 2,
+  "replace_min_ms": 300,
+  "replace_min_interval_ms": 150,
+  "note": "fast",
+  "saved_ms": 1757823007984
+}
